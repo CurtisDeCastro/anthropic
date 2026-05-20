@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sigma Customer Embed POC</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sigma-purple: #5f4fdb;
+      --sigma-purple-light: #ede9ff;
+      --sigma-dark: #1a1a2e;
+      --text: #1f2937;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --bg: #f9fafb;
+      --white: #ffffff;
+      --success: #059669;
+      --warning: #d97706;
+      --error: #dc2626;
+      --base-col: #0ea5e9;
+      --custom-col: #f59e0b;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--sigma-dark);
+      color: var(--white);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--white);
+    }
+
+    header .badge {
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--sigma-purple);
+      color: var(--white);
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 24px;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-header .icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--sigma-purple-light);
+      border-radius: 4px;
+      color: var(--sigma-purple);
+      font-size: 12px;
+    }
+
+    .panel-body { padding: 20px; }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      color: var(--text);
+      background: var(--white);
+      transition: border-color 0.15s;
+      outline: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--sigma-purple);
+      box-shadow: 0 0 0 3px var(--sigma-purple-light);
+    }
+
+    .customer-selector {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .customer-option {
+      position: relative;
+    }
+
+    .customer-option input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .customer-card {
+      display: block;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+      user-select: none;
+    }
+
+    .customer-card:hover {
+      border-color: var(--sigma-purple);
+      background: var(--sigma-purple-light);
+    }
+
+    .customer-option input:checked + .customer-card {
+      border-color: var(--sigma-purple);
+      background: var(--sigma-purple-light);
+      box-shadow: 0 0 0 2px var(--sigma-purple);
+    }
+
+    .customer-card .c-label {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .customer-card .c-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .optional-section {
+      margin-top: 4px;
+    }
+
+    details summary {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      padding: 6px 0;
+    }
+
+    details[open] summary { color: var(--sigma-purple); }
+
+    .btn {
+      width: 100%;
+      padding: 11px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--sigma-purple);
+      color: var(--white);
+      margin-top: 20px;
+    }
+
+    .btn-primary:hover { background: #4f40c0; }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .warning-box {
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #92400e;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+
+    /* Right column */
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Spec viewer */
+    .spec-legend {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      padding: 12px 20px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-base { background: var(--base-col); }
+    .dot-custom { background: var(--custom-col); }
+
+    .spec-tree {
+      padding: 16px 20px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--text-muted);
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .spec-empty {
+      padding: 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .col-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 4px 0;
+    }
+
+    .col-tag {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .col-name {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .col-formula {
+      color: var(--text-muted);
+      font-style: italic;
+      font-size: 11px;
+    }
+
+    .spec-section-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-top: 12px;
+      margin-bottom: 4px;
+      padding-bottom: 4px;
+      border-bottom: 1px dashed var(--border);
+    }
+
+    /* Embed area */
+    .embed-container {
+      min-height: 480px;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .embed-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-muted);
+    }
+
+    .embed-placeholder .ph-icon {
+      font-size: 40px;
+      opacity: 0.3;
+    }
+
+    .embed-placeholder p {
+      font-size: 14px;
+    }
+
+    #embed-iframe {
+      width: 100%;
+      height: 560px;
+      border: none;
+      display: none;
+    }
+
+    .embed-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .embed-header .customer-pill {
+      font-size: 13px;
+      font-weight: 600;
+      background: var(--sigma-purple-light);
+      color: var(--sigma-purple);
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+
+    .embed-header .url-snippet {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 400px;
+    }
+
+    #embed-header-bar { display: none; }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--sigma-purple);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-box {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--error);
+      display: none;
+    }
+
+    @media (max-width: 900px) {
+      .main {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">Sigma</span>
+  <span class="badge">Embed POC</span>
+</header>
+
+<div class="main">
+  <!-- Left: config panel -->
+  <div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="icon">⚙</span>
+        Embed Configuration
+      </div>
+      <div class="panel-body">
+
+        <div class="warning-box">
+          <strong>Development only.</strong> Credentials are sent to the local server to sign the JWT.
+          In production, store credentials server-side and never expose the embed secret to the browser.
+        </div>
+
+        <div class="form-group">
+          <label>Embed Client ID</label>
+          <input type="text" id="clientId" placeholder="your-client-id" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Embed Secret</label>
+          <input type="password" id="secret" placeholder="your-embed-secret" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Embed User Email</label>
+          <input type="email" id="email" placeholder="embed-user@example.com" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Customer</label>
+          <div class="customer-selector">
+            <label class="customer-option">
+              <input type="radio" name="customer" value="Customer A" />
+              <span class="customer-card">
+                <div class="c-label">Customer A</div>
+                <div class="c-sub">AGE_GROUP column</div>
+              </span>
+            </label>
+            <label class="customer-option">
+              <input type="radio" name="customer" value="Customer B" />
+              <span class="customer-card">
+                <div class="c-label">Customer B</div>
+                <div class="c-sub">Birthday column</div>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <details class="optional-section">
+          <summary>Optional JWT claims</summary>
+          <div style="padding-top: 12px;">
+            <div class="form-group">
+              <label>Account Type</label>
+              <input type="text" id="accountType" placeholder="viewer" />
+            </div>
+            <div class="form-group">
+              <label>Teams (comma-separated)</label>
+              <input type="text" id="teams" placeholder="team-a, analysts" />
+            </div>
+          </div>
+        </details>
+
+        <button class="btn btn-primary" id="embedBtn" disabled>Generate Embed</button>
+        <div class="error-box" id="errorBox"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: spec view + embed -->
+  <div class="right-col">
+
+    <!-- Spec composition viewer -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="icon">⬡</span>
+        Composed Workbook Spec
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400;">
+          POC: base + customer columns merged at request time
+        </span>
+      </div>
+      <div class="spec-legend">
+        <span class="legend-item">
+          <span class="legend-dot dot-base"></span>Base columns (shared)
+        </span>
+        <span class="legend-item">
+          <span class="legend-dot dot-custom"></span>Customer-specific column
+        </span>
+      </div>
+      <div id="specViewer">
+        <div class="spec-empty">Select a customer to preview the composed spec.</div>
+      </div>
+    </div>
+
+    <!-- Embed output -->
+    <div class="panel embed-container" id="embedPanel">
+      <div id="embedHeaderBar" class="embed-header" style="display:none;width:100%;position:absolute;top:0;left:0;">
+        <span class="customer-pill" id="embedCustomerPill"></span>
+        <span class="url-snippet" id="embedUrlSnippet"></span>
+      </div>
+      <div class="embed-placeholder" id="embedPlaceholder">
+        <div class="ph-icon">⬛</div>
+        <p>Configure credentials and select a customer to load the embed.</p>
+      </div>
+      <div id="loadingSpinner" style="display:none;" class="embed-placeholder">
+        <div class="spinner"></div>
+        <p>Generating JWT and loading embed…</p>
+      </div>
+      <iframe id="embedIframe" allow="fullscreen" style="display:none;margin-top:48px;width:100%;height:520px;border:none;"></iframe>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ---------------------------------------------------------------------------
+  // Spec preview renderer
+  //
+  // This mirrors the server-side buildSpec() logic so the user can see the
+  // composed spec in real time before hitting the server.  The authoritative
+  // spec is always assembled server-side (never trust client-side input for
+  // the actual embed URL).
+  // ---------------------------------------------------------------------------
+
+  const BASE_COLUMNS_PREVIEW = [
+    { id: 'inode-LDg6HOO23KsDKbK4oR4hL/ORDER_NUMBER', formula: '[…/Order Number]', name: 'ORDER_NUMBER' },
+    { id: 'inode-LDg6HOO23KsDKbK4oR4hL/SKU_NUMBER',   formula: '[…/Sku Number]',   name: 'SKU_NUMBER' },
+    { id: 'inode-LDg6HOO23KsDKbK4oR4hL/CUST_JSON',    formula: '[…/Cust Json]',    name: 'CUST_JSON' },
+  ];
+
+  const CUSTOMER_EXTRA_COLUMNS = {
+    'Customer A': [{ id: 'syaasfXKHZ', formula: 'Text([Cust Json].AGE_GROUP)', name: 'AGE_GROUP' }],
+    'Customer B': [{ id: 'syaasfXKHZ', formula: 'Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)', name: 'Birthday' }],
+  };
+
+  const CUSTOMER_WORKBOOK_URLS = {
+    'Customer A': 'https://staging.sigmacomputing.io/test-drive-staging-oai-demo/workbook/Customer-A-2D2ps4NFZpYHNHO7PGw1OY',
+    'Customer B': 'https://staging.sigmacomputing.io/test-drive-staging-oai-demo/workbook/Customer-B-52yQjgbpjd4i6fN9s9xF7X',
+  };
+
+  function renderSpec(customer) {
+    const viewer = document.getElementById('specViewer');
+    if (!customer) {
+      viewer.innerHTML = '<div class="spec-empty">Select a customer to preview the composed spec.</div>';
+      return;
+    }
+
+    const extra = CUSTOMER_EXTRA_COLUMNS[customer] || [];
+    const allCols = [...BASE_COLUMNS_PREVIEW, ...extra];
+
+    const colsHtml = allCols.map((c) => {
+      const isBase = BASE_COLUMNS_PREVIEW.some(b => b.id === c.id);
+      const dotColor = isBase ? 'var(--base-col)' : 'var(--custom-col)';
+      return `
+        <div class="col-row">
+          <span class="col-tag" style="background:${dotColor}"></span>
+          <div>
+            <span class="col-name">${c.name || c.id.split('/').pop()}</span>
+            <br/><span class="col-formula">${c.formula}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    viewer.innerHTML = `
+      <div class="spec-tree">
+        <div class="spec-section-label">Workbook URL</div>
+        <div style="font-size:11px;color:var(--text);word-break:break-all;margin-bottom:4px;">
+          ${CUSTOMER_WORKBOOK_URLS[customer]}
+        </div>
+
+        <div class="spec-section-label">
+          Table element — columns
+          <span style="font-weight:400;color:var(--text-muted);font-size:10px;margin-left:6px;">
+            (${BASE_COLUMNS_PREVIEW.length} base + ${extra.length} customer-specific)
+          </span>
+        </div>
+        ${colsHtml}
+
+        <div class="spec-section-label" style="margin-top:16px;">Production wiring note</div>
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">
+          In production, <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">extraColumns</code>
+          would be fetched from a mapping table keyed on customer ID.
+          The <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">buildSpec()</code>
+          function on the server is the only change point.
+        </div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Form state & validation
+  // ---------------------------------------------------------------------------
+
+  const clientIdEl  = document.getElementById('clientId');
+  const secretEl    = document.getElementById('secret');
+  const emailEl     = document.getElementById('email');
+  const embedBtn    = document.getElementById('embedBtn');
+  const errorBox    = document.getElementById('errorBox');
+
+  function getSelectedCustomer() {
+    const checked = document.querySelector('input[name="customer"]:checked');
+    return checked ? checked.value : null;
+  }
+
+  function validate() {
+    const ok = clientIdEl.value.trim() &&
+               secretEl.value.trim() &&
+               emailEl.value.trim() &&
+               getSelectedCustomer();
+    embedBtn.disabled = !ok;
+  }
+
+  [clientIdEl, secretEl, emailEl].forEach(el => el.addEventListener('input', validate));
+
+  document.querySelectorAll('input[name="customer"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      renderSpec(getSelectedCustomer());
+      validate();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Embed generation
+  // ---------------------------------------------------------------------------
+
+  embedBtn.addEventListener('click', async () => {
+    const customer = getSelectedCustomer();
+    errorBox.style.display = 'none';
+    showLoading(true);
+
+    try {
+      const res = await fetch('/api/embed-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId:    clientIdEl.value.trim(),
+          secret:      secretEl.value.trim(),
+          email:       emailEl.value.trim(),
+          customer,
+          accountType: document.getElementById('accountType').value.trim(),
+          teams:       document.getElementById('teams').value.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Server error');
+
+      loadEmbed(data.embedUrl, customer);
+    } catch (err) {
+      showLoading(false);
+      showError(err.message);
+    }
+  });
+
+  function showLoading(on) {
+    document.getElementById('embedPlaceholder').style.display = on ? 'none' : 'flex';
+    document.getElementById('loadingSpinner').style.display   = on ? 'flex' : 'none';
+    document.getElementById('embedIframe').style.display      = 'none';
+    document.getElementById('embedHeaderBar').style.display   = 'none';
+    embedBtn.disabled = on;
+  }
+
+  function loadEmbed(url, customer) {
+    const iframe    = document.getElementById('embedIframe');
+    const headerBar = document.getElementById('embedHeaderBar');
+
+    iframe.onload = () => {
+      document.getElementById('loadingSpinner').style.display = 'none';
+      iframe.style.display = 'block';
+      headerBar.style.display = 'flex';
+      embedBtn.disabled = false;
+      validate();
+    };
+
+    document.getElementById('embedCustomerPill').textContent = customer;
+    // Show a truncated URL (never log the full JWT to the DOM)
+    document.getElementById('embedUrlSnippet').textContent =
+      url.split('?')[0] + '?:jwt=…&:embed=true';
+
+    iframe.src = url;
+  }
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+    document.getElementById('embedPlaceholder').style.display = 'flex';
+    validate();
+  }
+</script>
+</body>
+</html>
