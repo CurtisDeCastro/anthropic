@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "sync-tags": "node scripts/sync-customer-tags.js",
+    "propagate-template": "node scripts/sync-customer-tags.js --mode template"
   },
   "dependencies": {
     "express": "^4.18.2",

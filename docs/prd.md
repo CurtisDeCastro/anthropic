@@ -12,7 +12,7 @@ Today's POC composes a customer-specific workbook spec at request time in `build
 
 This PRD specifies the production path: **one canonical embed workbook** with **per-customer tagged versions**. Each customer's tag is a frozen, immutable snapshot of the canonical workbook with that customer's JSON-extraction columns added on top. The embed URL targets the customer's tag by appending `/tag/<tagName>` to the canonical workbook URL before the JWT is signed.
 
-Customer-specific workbook edits are performed **by hand in the Sigma UI** (open the `template` tag, restore as draft, add the customer's columns, publish, apply `customer-<slug>` tag). The application code only maintains the mapping from customer ID to tag name and signs the URL. There is no programmatic spec push — see §3.
+A small reconciliation script (`scripts/sync-customer-tags.js`, exposed via two buttons in the Setup tab) walks `CUSTOMER_CONFIG`, builds the per-customer spec from `BASE_COLUMNS + extraColumns`, pushes it to the canonical workbook, and applies the `customer-<slug>` tag. A second mode pushes the `template` tag and then propagates that base across every customer tag. There is one open assumption about the workbook spec-push endpoint — see §3.
 
 This pattern is concurrency-safe by construction (tags are immutable), keeps embed latency at one HMAC sign, and reduces Sigma's document footprint from "one per customer" to "one for the embed, plus N tagged versions of it."
 
@@ -26,25 +26,24 @@ This pattern is concurrency-safe by construction (tags are immutable), keeps emb
 - Customer-specific column display names render as real labels in the Sigma UI (not parameterized placeholders).
 - Embed request path makes zero Sigma API calls. Latency is bounded by one HMAC sign.
 - Two concurrent embed requests from different customers cannot interfere with each other's view.
-- Adding a new customer is a documented, repeatable Sigma-UI procedure that takes a few minutes and requires no code change beyond a `CUSTOMER_CONFIG` entry.
+- Onboarding a new customer is a `CUSTOMER_CONFIG` edit plus one button click. Updating shared base columns is a `BASE_COLUMNS` edit plus one button click.
 
 ### Non-goals
 
-- **Automated provisioning of customer column formulas.** The Sigma public REST API does not expose programmatic mutation of a workbook spec (see §3), so this PRD does not attempt it. Operator does the customization step in the Sigma UI.
-- Live editing of customer overlays through the embed app UI. Overlays live in Sigma workbook tags.
+- Live editing of customer overlays through the embed app UI. Overlays live in `CUSTOMER_CONFIG` and are pushed via the sync script.
 - Multi-region / multi-tenant Sigma org support. One Sigma org assumed.
 - Migrating the existing two pre-built workbooks. They are demo artifacts and will be replaced by a single canonical workbook with two tagged versions.
+- Reconciling state when an operator has hand-edited a tagged version in the Sigma UI between sync runs. The script treats `CUSTOMER_CONFIG` as source-of-truth and overwrites.
 
 ---
 
-## 3. Why workbook-only (and what we are explicitly not doing)
+## 3. Why workbook-only
 
-The naïve plan — "mutate the canonical workbook's spec on every embed request" — fails for two reasons:
+The naïve plan — "mutate the canonical workbook's spec on every embed request" — fails because a workbook spec is **shared state, not session state**. Concurrent mutation by two tenant requests would interleave at the document level, so one tenant could briefly observe another's columns. Version tagging solves this by making each customer's state an immutable snapshot.
 
-1. **A workbook spec is shared state.** Concurrent mutation by two tenant requests would interleave at the document level, so one tenant could briefly observe another's columns. There is no per-session scoping.
-2. **The Sigma public REST API has no `setWorkbookSpec` endpoint.** Workbook-side programmatic surface is limited to create (`POST /v2/workbooks`), copy (`POST /v2/workbooks/{id}/copy`, `POST /v2/workbooks/{id}/tag/{versionTag}/copy`), template-save / template-instantiate, and tag (`POST /v2/workbooks/tag`). None of those let you push a new column formula into an existing workbook.
+The spec-push side has one open assumption worth calling out. The Sigma public REST API documents `PUT /v2/dataModels/{id}/spec` for data models but does not document an equivalent path for workbooks. This PRD assumes the workbook surface mirrors the data-model surface at `PUT /v2/workbooks/{workbookId}/spec`. The reconciliation script and demo buttons are wired against that path with the URL configurable via `SIGMA_SPEC_ENDPOINT_PATH` / `SIGMA_SPEC_ENDPOINT_METHOD` so the assumption is easy to swap. The tag-application step (`POST /v2/workbooks/tag`) is public and confirmed.
 
-Version tagging solves problem 1 (tagged versions are immutable). For problem 2, we accept that the customer's column edits are an operator action performed in the Sigma UI, and we **do not invest in a regen script that tries to push spec changes through the public API** — the API surface does not support it. The composed JSON produced by today's `buildSpec()` therefore has no production consumer and is removed.
+If the assumed endpoint turns out not to exist in your Sigma org, the fallback is to perform the spec edits in the Sigma UI ("restore tag as draft → edit → re-tag") and use the reconciliation script only to apply the tag. The script's two steps are decoupled for exactly this reason.
 
 ---
 
@@ -75,12 +74,12 @@ This is a documented Sigma feature (see "Link to a tagged version of a document"
 
 ### 4.4 Operator workflow
 
-Two operator actions, both performed in the Sigma UI:
+Two operator actions, both driven from `CUSTOMER_CONFIG` and either the Setup-tab buttons or the equivalent CLI:
 
-1. **Onboarding a new customer.** Operator opens the canonical workbook, navigates to Versions → Version history → restores `template` as a draft, adds the customer's JSON-extraction columns (e.g. `Text([Cust Json].AGE_GROUP)` named `AGE_GROUP`), publishes, then applies the `customer-<slug>` tag. They then add a `CUSTOMER_CONFIG` entry with that `tagName` and deploy the app.
-2. **Updating shared base columns.** Operator edits the `template` tag, then for each existing `customer-<slug>` tag: restores that tag as draft, applies the same base change, re-applies the tag. This is the O(N) operation that scales with customer count and is the explicit cost of the simple approach.
+1. **Onboarding a new customer.** Operator adds an entry to `CUSTOMER_CONFIG` in `lib/embed.js` (workbook id/url for the legacy embed flow, a `tagName`, and the `extraColumns` array describing the customer's JSON extractions). Clicks **Sync customer tags from config** in the Setup tab — or runs `npm run sync-tags -- --customer "<name>"` — and the script pushes the composed spec to the canonical workbook and applies the `customer-<slug>` tag. Idempotent: re-running is a no-op if nothing changed.
+2. **Updating shared base columns.** Operator edits `BASE_COLUMNS` in `lib/embed.js`. Clicks **Propagate template updates** — or runs `npm run propagate-template`. The script tags the new base as `template`, then iterates the per-customer rebuild so every `customer-<slug>` tag inherits the new base. This is the operation that scales with customer count, but it is one button click, not N Sigma-UI sessions.
 
-The version-tag UI steps (restore-as-draft, publish, set-tag) are documented in Sigma's [Add version tags to workbooks](https://help.sigmacomputing.com/sigma-computing/docs/add-version-tags-to-workbooks-and-data-models) guide; the runbook in §7 links operators directly to that page.
+Both buttons render a structured log of every API call below the buttons, so the operator can see exactly what was pushed and tagged. Dry-run is automatic when admin credentials aren't configured — the log shows what would be sent without performing the calls.
 
 ---
 
@@ -105,25 +104,30 @@ Post-PRD shape:
 ```js
 'Customer A': {
   tagName: 'customer-customer-a',
+  // workbookId / workbookUrl / extraColumns remain on each entry to drive
+  // the legacy demo embed flow and the spec composition consumed by the
+  // tag-sync script. The /api/embed-url path only reads `tagName` post-PRD.
 },
 ```
 
-The shared workbook ID and URL move into a single module-level `CANONICAL` constant:
+The canonical embed workbook (the new target of all spec push + tag operations) lives in a single module-level `CANONICAL` constant, sourced from env so the same code runs in any Sigma org:
 
 ```js
 const CANONICAL = {
-  workbookId: '<single canonical workbook id>',
-  workbookUrl: 'https://staging.sigmacomputing.io/<slug>/workbook/Embed-Plugs-Electronics-<id>',
+  workbookId: process.env.SIGMA_CANONICAL_WORKBOOK_ID,
+  workbookUrl: process.env.SIGMA_CANONICAL_WORKBOOK_URL,
 };
 ```
 
-The per-customer entry has exactly one field that the app code consumes (`tagName`). Anything else operators want to track (e.g. which JSON keys this customer uses, who owns the account) can live in the same object as documentation, but the app does not read it.
+### 5.2 `buildSpec()` keeps a real consumer
 
-### 5.2 Removed: `buildSpec()` and the spec preview UI
+`buildSpec(customer)` (`lib/embed.js:60`) is retained because it's now the source of truth for the spec the reconciliation script pushes to Sigma. Two helpers are added next to it:
 
-`buildSpec()` (`lib/embed.js:60`) has no production consumer in this architecture and is removed. `BASE_COLUMNS`, `BASE_SOURCE`, `PAGE_ID`, `ELEMENT_ID`, and `LAYOUT` (`lib/embed.js:11-39`) are also removed — they encoded a workbook structure that the app never pushes anywhere, and the source of truth for that structure is now the canonical workbook in Sigma itself.
+- `buildTemplateSpec()` — produces the base-only spec for the `template` tag.
+- `buildCanonicalCustomerSpec(customer)` — re-targets `buildSpec()`'s output at `CANONICAL.workbookId` instead of the customer's demo workbook.
+- `slugify(customerId)` — deterministic `customer-<slug>` tag name from a customer key.
 
-The live spec preview pane in `public/index.html` is removed for the same reason. Keeping it would imply the app composes a spec that gets applied somewhere, which is misleading post-PRD.
+The live spec preview pane in `public/index.html` is retained — post-PRD it actually previews what the sync buttons will push.
 
 ### 5.3 `generateEmbedUrl` modification
 
@@ -134,20 +138,27 @@ const taggedUrl = `${workbookUrl}/tag/${encodeURIComponent(tagName)}`;
 return `${taggedUrl}?:jwt=${encodeURIComponent(token)}&:embed=true`;
 ```
 
-Pass `tagName` through from `handleEmbedRequest` to `generateEmbedUrl`. `handleEmbedRequest` (`lib/embed.js:110`) becomes a tag-lookup + URL-concatenation + JWT-sign, with no spec composition and no `spec` field in the response body.
+Pass `tagName` through from `handleEmbedRequest` to `generateEmbedUrl`. `handleEmbedRequest` becomes a tag-lookup + URL-concatenation + JWT-sign in the request path, with no spec composition (the spec is only composed by the sync script, not by the embed handler).
 
-### 5.4 Validation script (lightweight, optional but recommended)
+### 5.4 Reconciliation script + demo buttons
 
-A small script — `scripts/validate-customer-tags.js` — that on demand:
+`lib/tag-sync.js` is the shared library used by all three consumers:
 
-- Authenticates against the Sigma REST API via OAuth client credentials.
-- Calls `GET /v2/workbooks/{CANONICAL.workbookId}/tags`.
-- Confirms every `tagName` referenced in `CUSTOMER_CONFIG` exists in the response.
-- Warns on orphan `customer-<slug>` tags that exist in Sigma but are not referenced by any `CUSTOMER_CONFIG` entry.
+- **CLI**: `scripts/sync-customer-tags.js` — copy-able standalone Node script. Flags `--mode customers|template`, `--customer <id>`, `--dry-run`. Exits non-zero on any failed customer. Heavily commented so an operator can drop the two files (`lib/tag-sync.js` + `scripts/sync-customer-tags.js`) into another project that mirrors this `CUSTOMER_CONFIG` shape.
+- **Express routes**: `POST /api/sync-tags`, `POST /api/propagate-template`, and the read-only probe `GET /api/sync-status` (so the UI can render its dry-run banner without performing API calls).
+- **Netlify functions**: `netlify/functions/sync-tags.js`, `netlify/functions/propagate-template.js`, `netlify/functions/sync-status.js`. Thin wrappers around the same library.
 
-This is not a regen script — it pushes no spec changes and creates no tags. It is purely a CI-friendly check that the config and Sigma are in sync. Failure exits non-zero so it can be wired into a deploy gate.
+Per-customer step sequence:
+1. Build spec via `buildCanonicalCustomerSpec(customerId)`. Strip `workbookId` / `url` / `_meta` (`stripSpecForPush` in `lib/tag-sync.js`).
+2. `PUT /v2/workbooks/{CANONICAL.workbookId}/spec` with the stripped body (see §3 for the open-assumption note on this endpoint).
+3. `POST /v2/workbooks/tag` with `{workbookId: CANONICAL.workbookId, tag: slugify(customerId)}`.
+4. Emit a structured log event.
 
-Authentication uses `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET` env vars, a **separate** OAuth client from the embed signing secret. These admin credentials are never loaded by the embed-url handler.
+"Propagate template updates" runs the same sequence but step 1 uses `buildTemplateSpec()` (no customer columns) and step 3 applies the `template` tag — then it iterates the per-customer sync above.
+
+Auto dry-run: if `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET` aren't set on the server, both buttons run in dry-run mode and the log panel shows the payloads that would have been sent. Live mode kicks in automatically when credentials are present.
+
+Authentication uses `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET` env vars, a **separate** OAuth client from the embed signing secret. These admin credentials are never loaded by `/api/embed-url`.
 
 ### 5.5 Concurrency and consistency properties
 
@@ -160,29 +171,45 @@ Authentication uses `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET` env vars, a **sepa
 |---|---|---|
 | `/api/embed-url` p50 | One HMAC sign (~1 ms) | One HMAC sign (~1 ms) |
 | Sigma API calls in request path | 0 | 0 |
-| Onboarding a new customer | Manual workbook build, paste URL into config | Manual workbook tag in Sigma UI, paste tag name into config |
+| Onboarding a new customer | Manual workbook build, paste URL into config | `CUSTOMER_CONFIG` edit + one button click |
+| Updating shared base across all customers | Manual workbook re-build × N | `BASE_COLUMNS` edit + one button click |
 
-No change in request-path latency.
+No change in request-path latency. All Sigma API calls are in the offline sync path.
 
 ---
 
 ## 6. Code changes (file by file)
 
 ### `lib/embed.js`
-- Delete `BASE_SOURCE`, `BASE_COLUMNS`, `PAGE_ID`, `ELEMENT_ID`, `LAYOUT`. None are consumed.
-- Replace `CUSTOMER_CONFIG[*].workbookId / workbookUrl / extraColumns` with `CUSTOMER_CONFIG[*].tagName`.
-- Add module-level `CANONICAL = { workbookId, workbookUrl }`.
-- Delete `buildSpec`.
+- Keep `BASE_SOURCE`, `BASE_COLUMNS`, `PAGE_ID`, `ELEMENT_ID`, `LAYOUT`, `buildSpec()` — they now have a real consumer (the sync script).
+- Add module-level `CANONICAL = { workbookId, workbookUrl }` sourced from env vars.
+- Add `buildTemplateSpec()`, `buildCanonicalCustomerSpec(customer)`, `slugify(customerId)`.
+- Add `tagName` to each `CUSTOMER_CONFIG` entry.
 - Update `generateEmbedUrl` to accept and append `tagName`.
-- Update `handleEmbedRequest` to look up `tagName` and pass it through. Remove the `spec` field from the response body.
+- Update `handleEmbedRequest` to look up `tagName` and pass it through.
 
-### `scripts/validate-customer-tags.js` (new, small)
-- OAuth client-credentials auth against `POST /v2/auth/token`.
-- `GET /v2/workbooks/{workbookId}/tags`.
-- Diff against `CUSTOMER_CONFIG` tag names. Exit non-zero on missing tags.
+### `lib/tag-sync.js` (new)
+- `makeClient({ apiBase, clientId, clientSecret, onEvent })` — handles OAuth and detects dry-run.
+- `pushWorkbookSpec`, `tagWorkbookVersion` — primitive operations.
+- `syncCustomer`, `syncAllCustomers`, `pushTemplate`, `propagateTemplate` — orchestration.
+- Spec-push endpoint URL configurable via `SIGMA_SPEC_ENDPOINT_PATH` / `SIGMA_SPEC_ENDPOINT_METHOD`.
+
+### `scripts/sync-customer-tags.js` (new, copy-able)
+- Self-documenting CLI. Flags: `--mode customers|template`, `--customer <id>`, `--dry-run`.
+- Imports from `lib/tag-sync.js` + `lib/embed.js`. Drop both files into any project that mirrors the `CUSTOMER_CONFIG` shape and it works.
+- JSON-per-line structured log to stdout.
+
+### Server routes (Express + Netlify)
+- `server.js`: adds `POST /api/sync-tags`, `POST /api/propagate-template`, `GET /api/sync-status`.
+- `netlify/functions/sync-tags.js`, `netlify/functions/propagate-template.js`, `netlify/functions/sync-status.js`: matching serverless handlers.
+
+### `public/index.html`
+- New "Step 5 — Sync customer version tags" panel in the Setup tab. Two buttons (sync customer tags, propagate template), one live-mode/dry-run banner, one structured log panel that renders the events array returned by the endpoints.
 
 ### `package.json`
-- Add a `validate-tags` npm script: `"validate-tags": "node scripts/validate-customer-tags.js"`.
+- Add npm scripts:
+  - `"sync-tags": "node scripts/sync-customer-tags.js"`
+  - `"propagate-template": "node scripts/sync-customer-tags.js --mode template"`
 
 ### `public/index.html`
 - Remove the live composed-spec preview pane. Keep the customer selector, credential form (for the POC), and the iframe.
@@ -199,32 +226,31 @@ No change in request-path latency.
 
 ### Onboarding a new customer
 
-1. In the Sigma UI, open the canonical embed workbook.
-2. Document menu → Versions → Version history. Locate the `template` tag.
-3. More menu on the `template` row → **Restore version as draft**.
-4. In the draft, add the customer's JSON-extraction column(s). Use `Text([Cust Json].YOUR_KEY)` or the appropriate path syntax for nested JSON.
-5. Publish the draft.
-6. Document menu → Versions → **Tag this version**. Choose or create the `customer-<slug>` tag (color is up to operator preference but should be consistent across customers).
-7. In `lib/embed.js`, add to `CUSTOMER_CONFIG`:
+1. Add an entry to `CUSTOMER_CONFIG` in `lib/embed.js`:
    ```js
-   'New Customer Name': { tagName: 'customer-<slug>' },
+   'New Customer Name': {
+     workbookId: '...',          // legacy demo embed flow
+     workbookUrl: '...',
+     tagName: 'customer-<slug>',
+     extraColumns: [
+       { id: '...', formula: 'Text([Cust Json].YOUR_KEY)', name: 'YOUR_LABEL' },
+     ],
+   },
    ```
-8. `npm run validate-tags` to confirm the new tag is visible to the API.
-9. Deploy.
+2. Click **Sync customer tags from config** in the Setup tab (or `npm run sync-tags -- --customer "New Customer Name"`). Dry-run first if you want to inspect the payload.
+3. Deploy.
 
 ### Updating shared base columns
 
-1. In the Sigma UI, restore the `template` tag as draft, apply the base change, publish, re-apply the `template` tag to the new version.
-2. **For each existing customer:** restore the `customer-<slug>` tag as draft, apply the same base change (or merge from the new `template`), publish, re-apply the `customer-<slug>` tag.
-3. `npm run validate-tags`. No code change required.
-
-This step 2 is O(N) in customer count and is the explicit operational cost of the simple approach. If customer count grows past the point where this is comfortable, see §8.
+1. Edit `BASE_COLUMNS` in `lib/embed.js`.
+2. Click **Propagate template updates** in the Setup tab (or `npm run propagate-template`). This pushes the new base to the `template` tag, then iterates every customer-tag rebuild.
+3. Deploy.
 
 ### Removing a customer
 
-1. In the Sigma UI, remove the `customer-<slug>` tag from its version (Document menu → Versions → Version history → More → Remove this tag). Note Sigma's warning: any user with access only to the tagged version loses access.
-2. Delete the entry from `CUSTOMER_CONFIG`.
-3. `npm run validate-tags` to confirm no orphans remain (or accept that the orphan is intentional and acknowledged).
+1. Delete the entry from `CUSTOMER_CONFIG`.
+2. (Optional) In the Sigma UI, remove the orphaned `customer-<slug>` tag. Note Sigma's warning: any user with access only to the tagged version loses access.
+3. Deploy.
 
 ---
 
@@ -238,11 +264,11 @@ This PRD optimizes for **simplicity and operator-driven onboarding**. It is the 
 
 It is **not** the right choice when:
 
-- Customer count grows fast enough that the O(N) re-tag operation for base changes becomes a real burden.
 - Customer-specific logic grows complex (multiple data sources, materialized intermediates, cross-table joins).
-- You need customer onboarding to be fully scripted — e.g. from a CI pipeline or a self-service signup flow.
+- Schemas diverge enough that the single-element-per-page assumption stops holding.
+- Customer count scales to a point where the JSON payload pushed in step 1 (per-customer spec body) becomes unwieldy to review in CI.
 
-In those cases, lift the customer-specific column logic out of the workbook and into a **Sigma data model**. Data models have a `PUT /v2/dataModels/{id}/spec` endpoint that does support programmatic spec mutation. The pattern is: one canonical data model with tagged versions per customer (programmatically maintained), and the canonical workbook's per-customer tags use `dataModelSourceTaggedVersions` (a parameter on `POST /v2/workbooks/tag`) to bind each workbook tag to the customer's data-model tag. The request path stays a single HMAC sign and a tag-URL append; the regen script becomes fully automated end-to-end. This is the natural extension of this PRD, but the additional moving piece (data model) is only worth introducing once the simple approach starts to hurt.
+In those cases, lift the customer-specific column logic out of the workbook and into a **Sigma data model**. Data models have a `PUT /v2/dataModels/{id}/spec` endpoint with a published OpenAPI contract (no open assumption needed), and one canonical data model with tagged versions per customer combines with `dataModelSourceTaggedVersions` on `POST /v2/workbooks/tag` to give you per-customer source binding. The workbook stays thin and stable; complexity lives in the data model. The script changes shape but the embed request path (single HMAC sign, tag-URL append) is unchanged.
 
 ---
 
@@ -250,28 +276,30 @@ In those cases, lift the customer-specific column logic out of the workbook and 
 
 | Failure | Detection | Handling |
 |---|---|---|
-| Embed URL targets a tag that no longer exists | Sigma returns an error page in the iframe | `validate-customer-tags.js` catches this in CI before deploy. If it slips through, the iframe error is visible to the user and operator fixes the tag or the config. |
-| Operator forgets to apply the tag after publishing | Same as above | Same as above. |
-| Operator forgets to update `CUSTOMER_CONFIG` after tagging | New customer simply not selectable in the app | UI shows only customers from `CUSTOMER_CONFIG`. No silent breakage. |
-| Two operators edit the workbook concurrently | Sigma's draft model enforces single-draft state | Sigma surfaces the conflict in its UI; not the app's problem. |
-| Tag name conflict (someone reused a slug) | `POST /v2/workbooks/tag` returns 409 from the Sigma UI | Sigma rejects the operation and the operator chooses a different slug. |
+| Embed URL targets a tag that no longer exists | Sigma returns an error page in the iframe | Click **Sync customer tags from config** to recreate; the script is idempotent. |
+| Spec push fails (assumed endpoint not present, 4xx/5xx) | Log panel surfaces the status + body. Per-customer failure isolates from the rest of the loop. | Override `SIGMA_SPEC_ENDPOINT_PATH` / `SIGMA_SPEC_ENDPOINT_METHOD`, or fall back to in-Sigma-UI edits for the spec step and run only the tag step. |
+| OAuth token rejected mid-script | First API call after auth returns 401 | Script fails the affected customer and continues. Operator rotates `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET` and re-runs. |
+| Tag name conflict | `POST /v2/workbooks/tag` returns 409 | Script logs the conflict per customer. Operator either removes the conflicting tag or renames the customer slug. |
+| Operator forgets to update `CUSTOMER_CONFIG` | New customer simply not selectable in the app | UI shows only customers from `CUSTOMER_CONFIG`. No silent breakage. |
+| Two operators run the sync concurrently | Both write to the same canonical workbook draft | Sigma's draft model serializes; the second writer sees a conflict and the script reports it. Recommendation: gate the script behind a CI job that runs single-threaded. |
 
 ---
 
 ## 10. Security
 
 - **Embed signing secret** (current `secret` parameter in `handleEmbedRequest`): unchanged. Continues to live in server-side env vars only.
-- **Sigma admin client credentials** (new, `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET`): used only by `validate-customer-tags.js`. **Never** loaded by the embed-url handler. Scope: read-only access to tag and workbook metadata — `validate-customer-tags.js` does not need write scope.
+- **Sigma admin client credentials** (new, `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET`): used only by the sync script and the two button-backing routes. **Never** loaded by the embed-url handler. Required scopes: spec push on the canonical workbook and `POST /v2/workbooks/tag`.
 - **Tag name as identifier**: tag names are user-visible in Sigma. Use `customer-<slug>` derived from a non-PII customer ID, not from customer email addresses or anything else PII-bearing.
 
 ---
 
 ## 11. Open questions
 
-1. **Naming the canonical workbook in Sigma.** Pick once; this becomes the URL in `CANONICAL.workbookUrl` and changes are URL-breaking.
-2. **Tag color convention.** Sigma offers six tag colors. Suggested: `bronze` for `template`, `cyan` for all `customer-<slug>`. Confirm with whoever owns the Sigma org's visual conventions.
-3. **CI integration of the validation script.** Whether `npm run validate-tags` runs in PR checks (requires Sigma client creds in CI) or only locally pre-deploy.
-4. **Sigma org plan limits.** Confirm there is no per-org tag-count limit that would constrain customer count.
+1. **Confirm the workbook spec-push endpoint.** The script assumes `PUT /v2/workbooks/{workbookId}/spec` (mirroring the data-model surface). Verify against the actual Sigma org and override `SIGMA_SPEC_ENDPOINT_PATH` / `SIGMA_SPEC_ENDPOINT_METHOD` if it differs. The dry-run mode of both buttons surfaces the exact URL that will be hit.
+2. **Naming the canonical workbook in Sigma.** Pick once; this becomes the URL in `CANONICAL.workbookUrl` and changes are URL-breaking.
+3. **Tag color convention.** Sigma offers six tag colors. Suggested: `bronze` for `template`, `cyan` for all `customer-<slug>`. Confirm with whoever owns the Sigma org's visual conventions.
+4. **CI integration of the sync script.** Whether `npm run sync-tags` runs on merge-to-main (with secrets in CI) or only locally pre-deploy.
+5. **Sigma org plan limits.** Confirm there is no per-org tag-count limit that would constrain customer count.
 
 ---
 
@@ -279,26 +307,25 @@ In those cases, lift the customer-specific column logic out of the workbook and 
 
 | Milestone | Deliverable | Validation |
 |---|---|---|
-| M1 | Create the canonical embed workbook in Sigma. Apply the `template` tag. Manually create `customer-customer-a` and `customer-customer-b` tags with the existing per-customer columns. | Both tags visible in Versions → Version history. |
-| M2 | Refactor `lib/embed.js`: introduce `CANONICAL`, slim `CUSTOMER_CONFIG`, delete `buildSpec` and friends, update `generateEmbedUrl` to append `/tag/<tagName>`. Update `public/index.html` to remove the spec preview. | Existing two customers render correctly from the new tags. POC behavior is unchanged from the user's perspective. |
-| M3 | Add `scripts/validate-customer-tags.js`. Wire `npm run validate-tags` into the deploy procedure. | Script passes against M1 state; intentionally breaks if a `CUSTOMER_CONFIG` entry points to a non-existent tag. |
-| M4 | Update `docs/about.md`: replace the `🔮 spec push` block and the now-stale "spec composition" framing with the version-tagging description. | Docs match the implementation; the about page no longer claims spec composition is a deferred next step. |
-| M5 | Decommission the two original pre-built customer workbooks (manual cleanup in Sigma). | Sigma file browser shows only the canonical workbook in the embed folder. |
+| M1 | Create the canonical embed workbook in Sigma. Capture its ID + URL into `SIGMA_CANONICAL_WORKBOOK_ID` / `SIGMA_CANONICAL_WORKBOOK_URL`. | `lib/embed.js`'s `CANONICAL` reads real values, not the placeholder strings. |
+| M2 | Provision admin OAuth client credentials (`SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET`) with spec-push + tag scopes. | The Setup-tab banner reports "Live mode" instead of "Dry-run". |
+| M3 | Verify the spec-push endpoint path by clicking **Sync customer tags from config** with one customer in `CUSTOMER_CONFIG`. Adjust `SIGMA_SPEC_ENDPOINT_PATH` / `SIGMA_SPEC_ENDPOINT_METHOD` if the default 404s. | A `customer-<slug>` tag appears in the canonical workbook's version history. |
+| M4 | Click **Propagate template updates** to bootstrap the `template` tag + both demo customer tags from `CUSTOMER_CONFIG`. | All three tags visible. The embed endpoint hits each customer's tagged URL correctly. |
+| M5 | Update `generateEmbedUrl` to append `/tag/<tagName>`; switch the `/api/embed-url` flow over to the canonical workbook URL. | Existing two customers render correctly from the tagged URLs. |
+| M6 | Update `docs/about.md`: replace the `🔮 spec push` block with the version-tagging + script-driven description. | Docs match the implementation; the about page no longer claims spec composition is a deferred next step. |
+| M7 | Decommission the two original pre-built customer workbooks. | Sigma file browser shows only the canonical workbook in the embed folder. |
 
 ---
 
 ## 13. Appendix: Sigma API endpoints used
 
-All endpoints are on the Sigma public REST API (`/v2/...`).
-
-| Use | Endpoint |
-|---|---|
-| OAuth token (validation script auth) | `POST /v2/auth/token` |
-| List tags on the canonical workbook (validation script) | `GET /v2/workbooks/{workbookId}/tags` |
+| Use | Endpoint | Confirmed? |
+|---|---|---|
+| OAuth token for the sync script | `POST /v2/auth/token` | Confirmed public. |
+| Push spec to the canonical workbook | `PUT /v2/workbooks/{workbookId}/spec` (default; overridable via env) | **Assumed.** Mirrors the data-model surface; not in the public OpenAPI. |
+| Tag the published workbook version | `POST /v2/workbooks/tag` | Confirmed public. |
 
 Tagged-URL embed format (no API call, URL-path composition only):
 ```
 https://<org>.sigmacomputing.io/<slug>/workbook/<workbookName>-<workbookId>/tag/<tagName>
 ```
-
-Tag creation, application, and removal are performed by the operator **in the Sigma UI**, not through the REST API. The REST endpoints for those operations (`POST /v2/workbooks/tag`, `DELETE /v2/workbooks/{workbookId}/tags/{tagId}`) exist and could be wired into automation later, but they are out of scope for this PRD.

@@ -406,6 +406,75 @@
       transform: none;
     }
 
+    .btn-secondary {
+      background: var(--white);
+      color: var(--sigma-purple);
+      border: 1px solid var(--sigma-purple);
+      margin-top: 20px;
+    }
+    .btn-secondary:hover { background: var(--sigma-purple-light); }
+    .btn-secondary:active { transform: scale(0.98); }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .admin-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .admin-actions button { margin-top: 0; }
+
+    .admin-banner {
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #92400e;
+      margin: 12px 0 8px;
+    }
+    .admin-banner.live {
+      background: #dcfce7;
+      border-color: #86efac;
+      color: #166534;
+    }
+
+    .log-panel {
+      margin-top: 16px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+      max-height: 420px;
+      overflow: auto;
+    }
+    .log-row { display: flex; gap: 8px; padding: 2px 0; }
+    .log-row .lvl { flex: 0 0 48px; font-weight: 700; }
+    .log-row.info .lvl { color: #93c5fd; }
+    .log-row.warn .lvl { color: #fbbf24; }
+    .log-row.error .lvl { color: #fca5a5; }
+    .log-row .action { flex: 0 0 220px; color: #fef3c7; }
+    .log-row .body { flex: 1; color: #cbd5e1; word-break: break-word; }
+    .log-summary {
+      margin-bottom: 8px;
+      padding: 8px 10px;
+      background: #1e293b;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 12px;
+    }
+    .log-summary.ok { background: #14532d; color: #dcfce7; }
+    .log-summary.error { background: #7f1d1d; color: #fee2e2; }
+    .log-empty {
+      color: #64748b;
+      font-style: italic;
+      text-align: center;
+      padding: 24px 0;
+    }
+
     .warning-box {
       background: #fef3c7;
       border: 1px solid #fcd34d;
@@ -1034,7 +1103,69 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">5</span>Run it</h2>
+      <h2><span class="step-num">5</span>Sync customer version tags</h2>
+      <p>
+        The production architecture (see <code>docs/prd.md</code>) collapses the
+        two demo workbooks into a single canonical workbook with per-customer
+        <strong>version tags</strong>. The buttons below drive that reconciliation
+        without anyone having to click around in the Sigma UI.
+      </p>
+      <ul>
+        <li>
+          <strong>Sync customer tags from config</strong> — for every entry in
+          <code>CUSTOMER_CONFIG</code>, push the composed spec
+          (<code>BASE_COLUMNS</code> + that customer's <code>extraColumns</code>)
+          to the canonical workbook and apply the
+          <code>customer-&lt;slug&gt;</code> tag.
+        </li>
+        <li>
+          <strong>Propagate template updates</strong> — push the base-only spec,
+          tag it <code>template</code>, then re-sync every customer tag so they
+          inherit the new shared base.
+        </li>
+      </ul>
+
+      <div class="callout">
+        <strong>What runs underneath:</strong> the buttons POST to
+        <code>/api/sync-tags</code> and <code>/api/propagate-template</code>.
+        Both routes use the same code path as
+        <code>scripts/sync-customer-tags.js</code>, which you can drop into any
+        project that mirrors this <code>CUSTOMER_CONFIG</code> shape. The
+        equivalent CLI invocations:
+        <br/>
+        <code>npm run sync-tags</code> · <code>npm run propagate-template</code>
+        · <code>node scripts/sync-customer-tags.js --customer "Customer A"</code>
+      </div>
+
+      <div id="adminBanner" class="admin-banner">
+        Checking Sigma admin credentials…
+      </div>
+
+      <div class="admin-actions">
+        <button class="btn btn-primary" id="syncTagsBtn">Sync customer tags from config</button>
+        <button class="btn btn-secondary" id="propagateTemplateBtn">Propagate template updates</button>
+      </div>
+
+      <div class="log-panel" id="tagSyncLog">
+        <div class="log-empty">Run an action above to see the operation log here.</div>
+      </div>
+
+      <div class="callout callout-warn" style="margin-top:16px;">
+        <strong>One open assumption to know about.</strong> The Sigma public REST
+        API documents <code>PUT /v2/dataModels/&#123;id&#125;/spec</code> for data
+        models, but does not document an equivalent path for workbooks. This
+        script assumes the analogous path
+        (<code>PUT /v2/workbooks/&#123;workbookId&#125;/spec</code>) exists. If
+        your Sigma org exposes spec push at a different path, set
+        <code>SIGMA_SPEC_ENDPOINT_PATH</code> and
+        <code>SIGMA_SPEC_ENDPOINT_METHOD</code> in the server's environment. The
+        tag application step uses <code>POST /v2/workbooks/tag</code>, which is
+        public and confirmed.
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <h2><span class="step-num">6</span>Run it</h2>
       <p>From the project root:</p>
       <p>
         <code>npm install</code><br/>
@@ -1227,6 +1358,129 @@
     document.getElementById('embedPlaceholder').style.display = 'flex';
     validate();
   }
+
+  // ---------------------------------------------------------------------------
+  // Admin actions: tag sync + template propagation
+  //
+  // Both buttons POST to a server route that delegates into lib/tag-sync.js.
+  // The route returns { dryRun, events, result } — events is a structured log
+  // captured during the operation; we render it below the buttons.
+  // ---------------------------------------------------------------------------
+
+  const syncTagsBtn = document.getElementById('syncTagsBtn');
+  const propagateBtn = document.getElementById('propagateTemplateBtn');
+  const tagSyncLog = document.getElementById('tagSyncLog');
+  const adminBanner = document.getElementById('adminBanner');
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function eventSummary(e) {
+    // Produce a one-line summary plus an optional details JSON for the event.
+    const bits = [];
+    if (e.method && e.url) bits.push(`${e.method} ${e.url}`);
+    if (e.tag) bits.push(`tag=${e.tag}`);
+    if (e.customerId) bits.push(`customer=${e.customerId}`);
+    if (typeof e.columnCount === 'number') bits.push(`columns=${e.columnCount}`);
+    if (typeof e.status === 'number') bits.push(`status=${e.status}`);
+    if (e.error) bits.push(`error=${e.error}`);
+    if (e.reason) bits.push(e.reason);
+    return bits.join(' · ');
+  }
+
+  function renderLog({ dryRun, events, result, error }) {
+    const rows = [];
+
+    let summaryClass = 'log-summary';
+    let summaryText;
+    if (error) {
+      summaryClass += ' error';
+      summaryText = `✕  ${error}`;
+    } else {
+      const customers = Array.isArray(result) ? result : result?.customers;
+      const failed = (customers || []).filter((c) => !c.ok);
+      const succeeded = (customers || []).filter((c) => c.ok);
+      summaryClass += failed.length ? ' error' : ' ok';
+      const mode = dryRun ? ' (dry-run)' : '';
+      if (Array.isArray(result)) {
+        summaryText = `${failed.length ? '✕' : '✓'}  ${succeeded.length}/${customers.length} customers synced${mode}`;
+      } else if (result?.template) {
+        summaryText = `${failed.length ? '✕' : '✓'}  template applied + ${succeeded.length}/${customers.length} customers synced${mode}`;
+      } else {
+        summaryText = `✓  done${mode}`;
+      }
+    }
+    rows.push(`<div class="${summaryClass}">${escapeHtml(summaryText)}</div>`);
+
+    (events || []).forEach((e) => {
+      const lvl = e.level || 'info';
+      const action = e.action || '';
+      const body = eventSummary(e);
+      rows.push(
+        `<div class="log-row ${escapeHtml(lvl)}">
+          <span class="lvl">${escapeHtml(lvl.toUpperCase())}</span>
+          <span class="action">${escapeHtml(action)}</span>
+          <span class="body">${escapeHtml(body)}</span>
+        </div>`,
+      );
+    });
+
+    tagSyncLog.innerHTML = rows.join('');
+  }
+
+  async function runAdminAction(endpoint) {
+    syncTagsBtn.disabled = true;
+    propagateBtn.disabled = true;
+    tagSyncLog.innerHTML = '<div class="log-empty">Running…</div>';
+
+    try {
+      const res = await fetch(endpoint, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        renderLog({ dryRun: data.dryRun, events: data.events || [], error: data.error || `HTTP ${res.status}` });
+      } else {
+        renderLog(data);
+        // Update the banner based on what we observed.
+        if (data.dryRun) {
+          adminBanner.classList.remove('live');
+          adminBanner.innerHTML =
+            'Dry-run mode — set <code>SIGMA_CLIENT_ID</code> and <code>SIGMA_CLIENT_SECRET</code> on the server to make real API calls.';
+        } else {
+          adminBanner.classList.add('live');
+          adminBanner.innerHTML = 'Live mode — operations hit the configured Sigma org.';
+        }
+      }
+    } catch (err) {
+      renderLog({ events: [], error: err.message });
+    } finally {
+      syncTagsBtn.disabled = false;
+      propagateBtn.disabled = false;
+    }
+  }
+
+  syncTagsBtn.addEventListener('click', () => runAdminAction('/api/sync-tags'));
+  propagateBtn.addEventListener('click', () => runAdminAction('/api/propagate-template'));
+
+  // Read-only probe to set the banner. /api/sync-status only inspects whether
+  // credentials are configured; it never performs Sigma API calls.
+  fetch('/api/sync-status')
+    .then((r) => r.json().catch(() => ({})))
+    .then((data) => {
+      if (data.dryRun) {
+        adminBanner.classList.remove('live');
+        adminBanner.innerHTML =
+          'Dry-run mode — set <code>SIGMA_CLIENT_ID</code> and <code>SIGMA_CLIENT_SECRET</code> on the server to make real API calls.';
+      } else {
+        adminBanner.classList.add('live');
+        adminBanner.innerHTML = 'Live mode — operations hit the configured Sigma org.';
+      }
+    })
+    .catch(() => {
+      adminBanner.innerHTML = 'Could not reach the sync endpoint. Is the server running?';
+    });
 
   // ---------------------------------------------------------------------------
   // Tab navigation (Embed / About / Setup)
