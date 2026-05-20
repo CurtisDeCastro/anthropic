@@ -39,6 +39,12 @@
       gap: 12px;
     }
 
+    header .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
     header .logo {
       font-size: 20px;
       font-weight: 700;
@@ -54,6 +60,182 @@
       border-radius: 4px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+    }
+
+    .tabs {
+      margin-left: auto;
+      display: flex;
+      gap: 2px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 4px;
+      border-radius: 8px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+
+    .tab-btn:hover { color: var(--white); }
+    .tab-btn.active {
+      background: var(--sigma-purple);
+      color: var(--white);
+    }
+
+    .content-section { display: none; }
+    .content-section.active { display: block; }
+
+    /* Documentation pages (About, Setup) */
+    .doc-page {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    .doc-page h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
+    }
+
+    .doc-page .lede {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .doc-page h2 {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 36px 0 12px;
+      padding-top: 8px;
+    }
+
+    .doc-page h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 20px 0 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    .doc-page p {
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .doc-page ul, .doc-page ol {
+      font-size: 14px;
+      line-height: 1.8;
+      padding-left: 24px;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    .doc-page li { margin-bottom: 4px; }
+
+    .doc-page code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12.5px;
+      color: #be185d;
+    }
+
+    .doc-page strong { font-weight: 700; }
+
+    .diagram-wrap {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 20px 0 24px;
+    }
+
+    .diagram-wrap svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .diagram-caption {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 12px;
+      font-style: italic;
+    }
+
+    .callout {
+      background: var(--sigma-purple-light);
+      border-left: 3px solid var(--sigma-purple);
+      padding: 12px 16px;
+      border-radius: 4px;
+      font-size: 13.5px;
+      color: var(--text);
+      line-height: 1.6;
+      margin: 16px 0;
+    }
+
+    .callout strong { color: var(--sigma-purple); }
+
+    .callout-warn {
+      background: #fef3c7;
+      border-left-color: #d97706;
+    }
+    .callout-warn strong { color: #92400e; }
+
+    .step-num {
+      display: inline-flex;
+      width: 22px;
+      height: 22px;
+      background: var(--sigma-purple);
+      color: var(--white);
+      border-radius: 50%;
+      font-weight: 700;
+      font-size: 11px;
+      align-items: center;
+      justify-content: center;
+      margin-right: 8px;
+      vertical-align: -4px;
+    }
+
+    .setup-step {
+      border-left: 2px solid var(--border);
+      padding: 4px 0 8px 20px;
+      margin-bottom: 8px;
+    }
+
+    .setup-step h2 {
+      margin-top: 12px;
+      font-size: 16px;
+    }
+
+    .path-trail {
+      display: inline-block;
+      background: #f3f4f6;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      color: var(--text);
     }
 
     .main {
@@ -416,16 +598,30 @@
       .main {
         grid-template-columns: 1fr;
       }
+      header { flex-wrap: wrap; }
+      .tabs { width: 100%; margin-left: 0; justify-content: center; }
+    }
+
+    @media (max-width: 600px) {
+      .tab-btn { padding: 6px 10px; font-size: 12px; }
     }
   </style>
 </head>
 <body>
 
 <header>
-  <span class="logo">Sigma</span>
-  <span class="badge">Embed POC</span>
+  <div class="brand">
+    <span class="logo">Sigma</span>
+    <span class="badge">Embed POC</span>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="embed">Embed</button>
+    <button class="tab-btn" data-tab="about">About</button>
+    <button class="tab-btn" data-tab="setup">Setup</button>
+  </nav>
 </header>
 
+<section class="content-section active" data-section="embed">
 <div class="main">
   <!-- Left: config panel -->
   <div>
@@ -540,6 +736,323 @@
 
   </div>
 </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- ABOUT SECTION                                                -->
+<!-- ============================================================ -->
+<section class="content-section" data-section="about">
+  <div class="doc-page">
+    <h1>About this app</h1>
+    <p class="lede">
+      This is a proof-of-concept for embedding per-customer Sigma workbooks
+      using JWT-signed URLs. It demonstrates a small but useful pattern: a
+      shared <strong>base spec</strong> that composes additional columns per
+      customer at request time, so the customer-specific schema can eventually
+      be driven by a mapping table rather than hand-maintained workbooks.
+    </p>
+
+    <h2>Request flow</h2>
+    <p>
+      Three actors are involved: the browser collects inputs and renders the
+      iframe, an Express server holds the embed secret and signs the JWT, and
+      Sigma validates the token and serves the workbook.
+    </p>
+
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 900 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Request flow diagram">
+        <defs>
+          <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#5f4fdb"/>
+          </marker>
+          <marker id="arrow-grey" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#6b7280"/>
+          </marker>
+        </defs>
+
+        <!-- Browser box -->
+        <rect x="20" y="40" width="200" height="90" rx="10" fill="#ede9ff" stroke="#5f4fdb" stroke-width="1.5"/>
+        <text x="120" y="68" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a2e" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Browser</text>
+        <text x="120" y="88" text-anchor="middle" font-size="11" fill="#6b7280" font-family="-apple-system, sans-serif">public/index.html</text>
+        <text x="120" y="106" text-anchor="middle" font-size="10" fill="#9ca3af" font-family="-apple-system, sans-serif">customer select · form · iframe</text>
+
+        <!-- Server box -->
+        <rect x="340" y="40" width="220" height="280" rx="10" fill="#ffffff" stroke="#5f4fdb" stroke-width="1.5"/>
+        <text x="450" y="68" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a2e" font-family="-apple-system, sans-serif">Express server</text>
+        <text x="450" y="86" text-anchor="middle" font-size="11" fill="#6b7280" font-family="-apple-system, sans-serif">server.js · /api/embed-url</text>
+
+        <rect x="360" y="110" width="180" height="44" rx="6" fill="#f3f4f6"/>
+        <text x="450" y="130" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">buildSpec(customer)</text>
+        <text x="450" y="146" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">base cols + customer cols</text>
+
+        <rect x="360" y="166" width="180" height="44" rx="6" fill="#f3f4f6"/>
+        <text x="450" y="186" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">jwt.sign(claims, secret)</text>
+        <text x="450" y="202" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">HS256, kid = clientId</text>
+
+        <rect x="360" y="222" width="180" height="44" rx="6" fill="#f3f4f6"/>
+        <text x="450" y="242" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">build embed URL</text>
+        <text x="450" y="258" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">…?:jwt=…&amp;:embed=true</text>
+
+        <rect x="360" y="278" width="180" height="28" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+        <text x="450" y="296" text-anchor="middle" font-size="11" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">🔒 secret never leaves server</text>
+
+        <!-- Sigma box -->
+        <rect x="680" y="40" width="200" height="90" rx="10" fill="#ede9ff" stroke="#5f4fdb" stroke-width="1.5"/>
+        <text x="780" y="68" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a2e" font-family="-apple-system, sans-serif">Sigma</text>
+        <text x="780" y="88" text-anchor="middle" font-size="11" fill="#6b7280" font-family="-apple-system, sans-serif">validates JWT</text>
+        <text x="780" y="106" text-anchor="middle" font-size="10" fill="#9ca3af" font-family="-apple-system, sans-serif">renders embedded workbook</text>
+
+        <!-- Arrow 1: Browser → Server -->
+        <line x1="222" y1="68" x2="335" y2="68" stroke="#5f4fdb" stroke-width="2" marker-end="url(#arrow-purple)"/>
+        <text x="278" y="58" text-anchor="middle" font-size="11" font-weight="700" fill="#5f4fdb" font-family="-apple-system, sans-serif">① POST</text>
+        <text x="278" y="82" text-anchor="middle" font-size="9" fill="#6b7280" font-family="SF Mono, monospace">{ clientId, secret,</text>
+        <text x="278" y="94" text-anchor="middle" font-size="9" fill="#6b7280" font-family="SF Mono, monospace">  email, customer }</text>
+
+        <!-- Arrow 2: Server → Browser -->
+        <line x1="335" y1="110" x2="222" y2="110" stroke="#5f4fdb" stroke-width="2" marker-end="url(#arrow-purple)"/>
+        <text x="278" y="122" text-anchor="middle" font-size="11" font-weight="700" fill="#5f4fdb" font-family="-apple-system, sans-serif">② { embedUrl }</text>
+
+        <!-- Arrow 3: Browser → Sigma (iframe load) -->
+        <path d="M 120,132 L 120,380 L 780,380 L 780,135" stroke="#6b7280" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow-grey)"/>
+        <text x="450" y="404" text-anchor="middle" font-size="12" font-weight="700" fill="#6b7280" font-family="-apple-system, sans-serif">③ iframe.src = embedUrl &nbsp;→&nbsp; Sigma validates JWT &amp; renders workbook</text>
+        <text x="450" y="422" text-anchor="middle" font-size="10" fill="#9ca3af" font-family="-apple-system, sans-serif">(direct browser → Sigma; the app server is no longer in the loop)</text>
+      </svg>
+      <div class="diagram-caption">Figure 1 — Embed request lifecycle. The secret only ever lives on the server.</div>
+    </div>
+
+    <ol>
+      <li>The browser <code>POST</code>s the embed credentials, embed-user email, and selected customer to <code>/api/embed-url</code>.</li>
+      <li>The server looks up the customer's workbook URL, composes the spec, signs a JWT with the embed secret, and returns the final URL.</li>
+      <li>The browser sets the iframe <code>src</code> directly to that URL. The server is no longer involved — Sigma validates the token and serves the workbook to the iframe.</li>
+    </ol>
+
+    <h2>Spec composition</h2>
+    <p>
+      Today the two specs are checked into <code>server.js</code> as a static
+      <code>CUSTOMER_CONFIG</code> object. The interesting part is the seam:
+      every spec is composed at request time from a shared base plus a
+      per-customer column list. Swap the static object for a database lookup
+      and the rest of the pipeline doesn't change.
+    </p>
+
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spec composition diagram">
+        <defs>
+          <marker id="arrow-amber" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#d97706"/>
+          </marker>
+          <marker id="arrow-slate" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#475569"/>
+          </marker>
+        </defs>
+
+        <!-- Base spec (top) -->
+        <rect x="270" y="20" width="360" height="110" rx="10" fill="#dbeafe" stroke="#0ea5e9" stroke-width="1.5"/>
+        <text x="450" y="46" text-anchor="middle" font-size="14" font-weight="700" fill="#0c4a6e" font-family="-apple-system, sans-serif">BASE_COLUMNS (shared)</text>
+        <text x="450" y="64" text-anchor="middle" font-size="11" fill="#0369a1" font-family="-apple-system, sans-serif">source: PLUGS_ELECTRONICS_HANDS_ON_LAB_DATA</text>
+        <text x="310" y="92" font-size="11" fill="#0c4a6e" font-family="SF Mono, monospace">• ORDER_NUMBER</text>
+        <text x="440" y="92" font-size="11" fill="#0c4a6e" font-family="SF Mono, monospace">• SKU_NUMBER</text>
+        <text x="540" y="92" font-size="11" fill="#0c4a6e" font-family="SF Mono, monospace">• CUST_JSON</text>
+        <text x="450" y="115" text-anchor="middle" font-size="10" fill="#0369a1" font-family="-apple-system, sans-serif" font-style="italic">— defined once in server.js</text>
+
+        <!-- buildSpec() merge node -->
+        <rect x="370" y="158" width="160" height="42" rx="21" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+        <text x="450" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" font-family="SF Mono, monospace">buildSpec(customer)</text>
+        <text x="450" y="193" text-anchor="middle" font-size="9" fill="#cbd5e1" font-family="-apple-system, sans-serif">base + customer columns</text>
+
+        <!-- Connector base → buildSpec -->
+        <line x1="450" y1="130" x2="450" y2="155" stroke="#475569" stroke-width="2" marker-end="url(#arrow-slate)"/>
+
+        <!-- Customer config feed (left, dashed: future mapping table) -->
+        <rect x="40" y="158" width="280" height="42" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <text x="180" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#334155" font-family="-apple-system, sans-serif">Customer config</text>
+        <text x="180" y="193" text-anchor="middle" font-size="10" fill="#64748b" font-family="-apple-system, sans-serif" font-style="italic">today: static map · future: DB lookup</text>
+        <line x1="320" y1="179" x2="365" y2="179" stroke="#475569" stroke-width="2" marker-end="url(#arrow-slate)"/>
+
+        <!-- Branches: A and B -->
+        <line x1="410" y1="200" x2="200" y2="240" stroke="#d97706" stroke-width="2" marker-end="url(#arrow-amber)"/>
+        <line x1="490" y1="200" x2="700" y2="240" stroke="#d97706" stroke-width="2" marker-end="url(#arrow-amber)"/>
+        <text x="290" y="225" text-anchor="middle" font-size="10" font-weight="700" fill="#d97706" font-family="-apple-system, sans-serif">if "Customer A"</text>
+        <text x="610" y="225" text-anchor="middle" font-size="10" font-weight="700" fill="#d97706" font-family="-apple-system, sans-serif">if "Customer B"</text>
+
+        <!-- Customer A box -->
+        <rect x="40" y="245" width="320" height="180" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+        <text x="200" y="272" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">Customer A spec</text>
+        <text x="60" y="298" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">+ AGE_GROUP</text>
+        <text x="60" y="314" font-size="10" fill="#a16207" font-family="SF Mono, monospace">Text([Cust Json].AGE_GROUP)</text>
+
+        <rect x="60" y="335" width="280" height="38" rx="6" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
+        <text x="200" y="352" text-anchor="middle" font-size="10" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">workbook URL</text>
+        <text x="200" y="367" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">…/workbook/Customer-A-2D2ps4…</text>
+
+        <text x="200" y="395" text-anchor="middle" font-size="10" fill="#a16207" font-family="-apple-system, sans-serif" font-style="italic">— passed to JWT signer →</text>
+
+        <!-- Customer B box -->
+        <rect x="540" y="245" width="320" height="180" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+        <text x="700" y="272" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">Customer B spec</text>
+        <text x="560" y="298" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">+ Birthday</text>
+        <text x="560" y="314" font-size="10" fill="#a16207" font-family="SF Mono, monospace">Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)</text>
+
+        <rect x="560" y="335" width="280" height="38" rx="6" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
+        <text x="700" y="352" text-anchor="middle" font-size="10" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">workbook URL</text>
+        <text x="700" y="367" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">…/workbook/Customer-B-52yQjg…</text>
+
+        <text x="700" y="395" text-anchor="middle" font-size="10" fill="#a16207" font-family="-apple-system, sans-serif" font-style="italic">— passed to JWT signer →</text>
+
+        <!-- Bottom note -->
+        <rect x="200" y="430" width="500" height="26" rx="4" fill="#f3f4f6" stroke="#d1d5db" stroke-width="1"/>
+        <text x="450" y="447" text-anchor="middle" font-size="11" fill="#374151" font-family="-apple-system, sans-serif">
+          🚀  Production path: replace the static map with a customer ID → column overrides table
+        </text>
+      </svg>
+      <div class="diagram-caption">Figure 2 — Spec composition. Base columns are defined once; per-customer columns are merged in at request time.</div>
+    </div>
+
+    <p>
+      The shape <code>buildSpec()</code> returns mirrors what the Sigma
+      <code>GET&nbsp;/workbooks/:id</code> endpoint produces — but only
+      <code>pages</code> and <code>layout</code> matter when pushing back into
+      Sigma. Read-only metadata fields like <code>workbookId</code>,
+      <code>ownerId</code>, and timestamps are stripped server-side and aren't
+      part of the create/update payload.
+    </p>
+
+    <h2>Why server-side signing?</h2>
+    <p>
+      The JWT is signed with your embed secret. That secret must never reach
+      the browser, so <code>/api/embed-url</code> is the only place it lives
+      in memory. The frontend only ever sees the final signed URL.
+    </p>
+    <div class="callout callout-warn">
+      <strong>Demo caveat:</strong> this POC collects the client ID and secret
+      from a form so you can try it without re-deploying. In production, store
+      them as server-side environment variables (e.g. <code>SIGMA_CLIENT_ID</code>,
+      <code>SIGMA_SECRET</code>) and remove the form fields entirely.
+    </div>
+
+    <h2>File map</h2>
+    <ul>
+      <li><code>server.js</code> — Express server. Holds <code>CUSTOMER_CONFIG</code>, <code>buildSpec()</code>, and the JWT signing logic.</li>
+      <li><code>public/index.html</code> — single-page UI. Form, customer selector, live spec preview, and the embed iframe.</li>
+      <li><code>package.json</code> — runtime deps: <code>express</code>, <code>jsonwebtoken</code>, <code>uuid</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SETUP SECTION                                                -->
+<!-- ============================================================ -->
+<section class="content-section" data-section="setup">
+  <div class="doc-page">
+    <h1>Setup</h1>
+    <p class="lede">
+      You need three things from your Sigma org to run this app: an
+      <strong>embed client ID</strong>, an <strong>embed secret</strong>, and an
+      <strong>embed user email</strong>. The deployed app's URL also needs to
+      be added to Sigma's allowed embed domains list.
+    </p>
+
+    <div class="setup-step">
+      <h2><span class="step-num">1</span>Generate embed client credentials</h2>
+      <p>
+        In Sigma, navigate to
+        <span class="path-trail">Administration → Developer Access</span>
+        (depending on your account it may be labelled <em>Embedding</em>).
+      </p>
+      <p>
+        Click <strong>Create New</strong>, choose <strong>Embed</strong> as the
+        credential type, and give it a name. Sigma will generate two values:
+      </p>
+      <ul>
+        <li><strong>Client ID</strong> — a UUID-shaped string. Goes in the <em>Embed Client ID</em> form field.</li>
+        <li><strong>Secret</strong> — a long random string. Goes in the <em>Embed Secret</em> field. Sigma only shows this <strong>once</strong> — copy it now.</li>
+      </ul>
+      <div class="callout">
+        <strong>Docs:</strong> Sigma's
+        <a href="https://help.sigmacomputing.com/sigma-computing/docs/generate-embed-client-credentials" target="_blank" rel="noopener" style="color:var(--sigma-purple);">Generate embed client credentials</a>
+        guide has the canonical walkthrough with screenshots.
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <h2><span class="step-num">2</span>Pick an embed user</h2>
+      <p>
+        The JWT's <code>sub</code> claim identifies the user the embed session
+        runs as. Two options:
+      </p>
+      <ul>
+        <li>
+          <strong>Internal user</strong> — an existing user in your Sigma org.
+          Use their email; leave the <em>Account Type</em> and <em>Teams</em>
+          fields blank.
+        </li>
+        <li>
+          <strong>Non-Sigma user</strong> — any email address. You must also
+          set <em>Account Type</em> (e.g. <code>viewer</code>) and at least one
+          <em>Team</em> so Sigma knows what permissions to grant.
+        </li>
+      </ul>
+    </div>
+
+    <div class="setup-step">
+      <h2><span class="step-num">3</span>Whitelist the app's origin</h2>
+      <p>
+        Sigma refuses to render the iframe unless the parent page's origin is
+        on the embed allow-list. In Sigma admin, find
+        <span class="path-trail">Account → Embedding → Allowed embed domains</span>
+        and add:
+      </p>
+      <ul>
+        <li>Local dev: <code>http://localhost:3000</code></li>
+        <li>Deployed: the URL your hosting platform returns (e.g. <code>https://your-app.onrender.com</code>)</li>
+      </ul>
+      <div class="callout callout-warn">
+        <strong>Symptom if you forget this:</strong> the iframe loads but shows
+        a blank page or a "refused to connect" message. Check the browser
+        console — Sigma surfaces a clear error.
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <h2><span class="step-num">4</span>Wire up your own workbooks (optional)</h2>
+      <p>
+        Out of the box this POC points at two demo workbooks
+        (<em>Customer A</em>, <em>Customer B</em>) in the
+        <code>test-drive-staging-oai-demo</code> org. To use your own,
+        edit <code>server.js</code> and replace the two
+        <code>workbookUrl</code> values inside <code>CUSTOMER_CONFIG</code>.
+      </p>
+      <p>The URL format Sigma's JWT embed accepts:</p>
+      <p>
+        <code>https://&lt;sigma-host&gt;/&lt;org-slug&gt;/workbook/&lt;workbook-name&gt;-&lt;workbook-id&gt;</code>
+      </p>
+      <p>
+        You can also adjust the columns each customer sees — base columns live
+        in <code>BASE_COLUMNS</code>, per-customer extras live in
+        <code>CUSTOMER_CONFIG.&lt;name&gt;.extraColumns</code>.
+      </p>
+    </div>
+
+    <div class="setup-step">
+      <h2><span class="step-num">5</span>Run it</h2>
+      <p>From the project root:</p>
+      <p>
+        <code>npm install</code><br/>
+        <code>npm start</code>
+      </p>
+      <p>
+        Open <code>http://localhost:3000</code>, paste your credentials and
+        embed-user email, pick a customer, and click <strong>Generate Embed</strong>.
+      </p>
+      <div class="callout">
+        <strong>For production:</strong> move <code>SIGMA_CLIENT_ID</code> and
+        <code>SIGMA_SECRET</code> into environment variables and remove the
+        form fields. The signing endpoint should be the only place the secret
+        appears.
+      </div>
+    </div>
+  </div>
+</section>
 
 <script>
   // ---------------------------------------------------------------------------
@@ -714,6 +1227,20 @@
     document.getElementById('embedPlaceholder').style.display = 'flex';
     validate();
   }
+
+  // ---------------------------------------------------------------------------
+  // Tab navigation (Embed / About / Setup)
+  // ---------------------------------------------------------------------------
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.content-section').forEach(s => {
+        s.classList.toggle('active', s.dataset.section === target);
+      });
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    });
+  });
 </script>
 </body>
 </html>
