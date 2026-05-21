@@ -16,30 +16,35 @@ app.get('/api/customers', (_req, res) => {
   res.json({ customers: Object.keys(CUSTOMER_CONFIG) });
 });
 
-async function runTagSync(res, op) {
+// Tag-sync operations take all Sigma config from the request body. The
+// in-app "Sigma Org Configuration" form is the source of truth; the server
+// itself holds nothing per-org.
+async function runTagSync(req, res, op) {
   const events = [];
+  const {
+    apiBase, adminClientId, adminClientSecret, canonicalWorkbookId,
+  } = req.body || {};
+
+  if (!canonicalWorkbookId) {
+    return res.status(400).json({ error: 'canonicalWorkbookId is required', events });
+  }
+
   try {
     const client = await makeClient({
-      apiBase: process.env.SIGMA_API_BASE,
-      clientId: process.env.SIGMA_CLIENT_ID,
-      clientSecret: process.env.SIGMA_CLIENT_SECRET,
+      apiBase,
+      clientId: adminClientId,
+      clientSecret: adminClientSecret,
       onEvent: (e) => events.push(e),
     });
-    const result = await op(client);
+    const result = await op(client, canonicalWorkbookId);
     res.json({ dryRun: client.dryRun, events, result });
   } catch (err) {
     res.status(500).json({ error: err.message, events });
   }
 }
 
-app.post('/api/sync-tags', (_req, res) => runTagSync(res, syncAllCustomers));
-app.post('/api/propagate-template', (_req, res) => runTagSync(res, propagateTemplate));
-
-// Read-only probe so the UI can tell dry-run vs live without running a sync.
-app.get('/api/sync-status', (_req, res) => {
-  const hasCreds = Boolean(process.env.SIGMA_CLIENT_ID && process.env.SIGMA_CLIENT_SECRET);
-  res.json({ dryRun: !hasCreds });
-});
+app.post('/api/sync-tags', (req, res) => runTagSync(req, res, syncAllCustomers));
+app.post('/api/propagate-template', (req, res) => runTagSync(req, res, propagateTemplate));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Sigma embed POC running at http://localhost:${PORT}`));

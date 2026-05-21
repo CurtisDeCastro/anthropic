@@ -108,11 +108,17 @@ async function main() {
   const apiBase = process.env.SIGMA_API_BASE;
   const clientId = process.env.SIGMA_CLIENT_ID;
   const clientSecret = process.env.SIGMA_CLIENT_SECRET;
+  const workbookId = process.env.SIGMA_CANONICAL_WORKBOOK_ID || '<workbookId-not-set>';
   const forceDry = args.dryRun || !clientId || !clientSecret;
 
   if (forceDry && !args.dryRun) {
     process.stderr.write(
       '# Dry-run mode (SIGMA_CLIENT_ID or SIGMA_CLIENT_SECRET unset). No API calls will be made.\n',
+    );
+  }
+  if (!forceDry && !process.env.SIGMA_CANONICAL_WORKBOOK_ID) {
+    process.stderr.write(
+      '# WARNING: SIGMA_CANONICAL_WORKBOOK_ID not set — operations will target the placeholder ID.\n',
     );
   }
 
@@ -136,17 +142,17 @@ async function main() {
       process.exit(1);
     }
     try {
-      result = await syncCustomer(client, args.customer);
+      result = await syncCustomer(client, workbookId, args.customer);
     } catch (err) {
       logEvent({ level: 'error', action: 'fatal', error: err.message });
       exitCode = 1;
     }
   } else if (args.mode === 'template') {
-    result = await propagateTemplate(client);
+    result = await propagateTemplate(client, workbookId);
     const failed = (result.customers || []).filter((c) => !c.ok);
     if (failed.length) exitCode = 1;
   } else {
-    result = await syncAllCustomers(client);
+    result = await syncAllCustomers(client, workbookId);
     if (result.some((c) => !c.ok)) exitCode = 1;
   }
 

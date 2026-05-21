@@ -5,17 +5,28 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
+  let body;
+  try { body = JSON.parse(event.body || '{}'); }
+  catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
+
+  const { apiBase, adminClientId, adminClientSecret, canonicalWorkbookId } = body;
   const events = [];
-  const onEvent = (e) => events.push(e);
+  if (!canonicalWorkbookId) {
+    return {
+      statusCode: 400,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'canonicalWorkbookId is required', events }),
+    };
+  }
 
   try {
     const client = await makeClient({
-      apiBase: process.env.SIGMA_API_BASE,
-      clientId: process.env.SIGMA_CLIENT_ID,
-      clientSecret: process.env.SIGMA_CLIENT_SECRET,
-      onEvent,
+      apiBase,
+      clientId: adminClientId,
+      clientSecret: adminClientSecret,
+      onEvent: (e) => events.push(e),
     });
-    const result = await propagateTemplate(client);
+    const result = await propagateTemplate(client, canonicalWorkbookId);
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },

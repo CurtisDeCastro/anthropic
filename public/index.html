@@ -317,8 +317,8 @@
 
     .customer-selector {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
     }
 
     .customer-option {
@@ -634,10 +634,13 @@
       font-family: monospace;
       font-size: 11px;
       color: var(--text-muted);
+      flex: 1;
+      min-width: 0;
+      margin-left: 16px;
+      text-align: right;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 400px;
     }
 
     #embed-header-bar { display: none; }
@@ -694,6 +697,52 @@
 <div class="main">
   <!-- Left: config panel -->
   <div>
+
+    <!-- Sigma Org Configuration: set once, persisted to localStorage. -->
+    <div class="panel" style="margin-bottom: 16px;">
+      <div class="panel-header">
+        <span class="icon">⬡</span>
+        Sigma Org Configuration
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400;">
+          set once · saved in localStorage
+        </span>
+      </div>
+      <div class="panel-body">
+
+        <div class="warning-box">
+          <strong>Dev/demo only.</strong> Admin client credentials in the browser
+          mean anyone with access to this page can call Sigma admin APIs. For
+          production, move these to server-side env and remove the form.
+        </div>
+
+        <div class="form-group">
+          <label>API Base</label>
+          <input type="text" id="apiBase" placeholder="https://aws-api.sigmacomputing.com" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Admin Client ID</label>
+          <input type="text" id="adminClientId" placeholder="for sync/template operations" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Admin Client Secret</label>
+          <input type="password" id="adminClientSecret" placeholder="separate from the embed signing secret" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Canonical Workbook ID</label>
+          <input type="text" id="canonicalWorkbookId" placeholder="uuid of the single embed workbook" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label>Canonical Workbook URL</label>
+          <input type="text" id="canonicalWorkbookUrl" placeholder="https://&lt;org&gt;.sigmacomputing.io/&lt;slug&gt;/workbook/&lt;name&gt;-&lt;id&gt;" autocomplete="off" />
+        </div>
+
+      </div>
+    </div>
+
     <div class="panel">
       <div class="panel-header">
         <span class="icon">⚙</span>
@@ -702,7 +751,7 @@
       <div class="panel-body">
 
         <div class="warning-box">
-          <strong>Development only.</strong> Credentials are sent to the local server to sign the JWT.
+          <strong>Dev/demo only.</strong> Credentials are sent to the local server to sign the JWT.
           In production, store credentials server-side and never expose the embed secret to the browser.
         </div>
 
@@ -736,6 +785,13 @@
               <span class="customer-card">
                 <div class="c-label">Customer B</div>
                 <div class="c-sub">Birthday column</div>
+              </span>
+            </label>
+            <label class="customer-option">
+              <input type="radio" name="customer" value="Template" />
+              <span class="customer-card">
+                <div class="c-label">Template</div>
+                <div class="c-sub">Base columns only</div>
               </span>
             </label>
           </div>
@@ -1204,11 +1260,13 @@
   const CUSTOMER_EXTRA_COLUMNS = {
     'Customer A': [{ id: 'syaasfXKHZ', formula: 'Text([Cust Json].AGE_GROUP)', name: 'AGE_GROUP' }],
     'Customer B': [{ id: 'syaasfXKHZ', formula: 'Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)', name: 'Birthday' }],
+    'Template':   [],
   };
 
   const CUSTOMER_TAG_NAMES = {
     'Customer A': 'customer-customer-a',
     'Customer B': 'customer-customer-b',
+    'Template':   'template',
   };
 
   function renderSpec(customer) {
@@ -1260,14 +1318,50 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Form state & validation
+  // Form state, localStorage persistence, and validation
   // ---------------------------------------------------------------------------
+
+  // Fields under "Sigma Org Configuration" — saved to localStorage so users
+  // don't have to retype them every refresh. The server no longer reads any
+  // of this from process.env; everything comes from the browser per request.
+  const PERSISTED_FIELDS = [
+    'apiBase', 'adminClientId', 'adminClientSecret',
+    'canonicalWorkbookId', 'canonicalWorkbookUrl',
+    'clientId', 'email', 'accountType', 'teams',
+    // Note: embed secret + admin secret intentionally NOT persisted by default.
+  ];
+  const LS_KEY = 'sigma-embed-poc:v1';
+
+  function loadPersisted() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch {}
+    for (const f of PERSISTED_FIELDS) {
+      const el = document.getElementById(f);
+      if (el && saved[f] != null) el.value = saved[f];
+    }
+  }
+
+  function persistOne(field) {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch {}
+    const el = document.getElementById(field);
+    if (el) saved[field] = el.value;
+    localStorage.setItem(LS_KEY, JSON.stringify(saved));
+  }
+
+  for (const f of PERSISTED_FIELDS) {
+    const el = document.getElementById(f);
+    if (el) el.addEventListener('input', () => { persistOne(f); validate(); updateAdminBanner(); });
+  }
+  loadPersisted();
 
   const clientIdEl  = document.getElementById('clientId');
   const secretEl    = document.getElementById('secret');
   const emailEl     = document.getElementById('email');
   const embedBtn    = document.getElementById('embedBtn');
   const errorBox    = document.getElementById('errorBox');
+  const canonicalWorkbookIdEl  = document.getElementById('canonicalWorkbookId');
+  const canonicalWorkbookUrlEl = document.getElementById('canonicalWorkbookUrl');
 
   function getSelectedCustomer() {
     const checked = document.querySelector('input[name="customer"]:checked');
@@ -1278,11 +1372,14 @@
     const ok = clientIdEl.value.trim() &&
                secretEl.value.trim() &&
                emailEl.value.trim() &&
+               canonicalWorkbookUrlEl.value.trim() &&
                getSelectedCustomer();
     embedBtn.disabled = !ok;
   }
 
-  [clientIdEl, secretEl, emailEl].forEach(el => el.addEventListener('input', validate));
+  [clientIdEl, secretEl, emailEl, canonicalWorkbookUrlEl].forEach(el =>
+    el.addEventListener('input', validate),
+  );
 
   document.querySelectorAll('input[name="customer"]').forEach(radio => {
     radio.addEventListener('change', () => {
@@ -1305,12 +1402,14 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clientId:    clientIdEl.value.trim(),
-          secret:      secretEl.value.trim(),
-          email:       emailEl.value.trim(),
+          clientId:               clientIdEl.value.trim(),
+          secret:                 secretEl.value.trim(),
+          email:                  emailEl.value.trim(),
           customer,
-          accountType: document.getElementById('accountType').value.trim(),
-          teams:       document.getElementById('teams').value.trim(),
+          accountType:            document.getElementById('accountType').value.trim(),
+          teams:                  document.getElementById('teams').value.trim(),
+          canonicalWorkbookUrl:   canonicalWorkbookUrlEl.value.trim(),
+          canonicalWorkbookId:    canonicalWorkbookIdEl.value.trim(),
         }),
       });
 
@@ -1345,9 +1444,11 @@
     };
 
     document.getElementById('embedCustomerPill').textContent = customer;
-    // Show a truncated URL (never log the full JWT to the DOM)
-    document.getElementById('embedUrlSnippet').textContent =
-      url.split('?')[0] + '?:jwt=…&:embed=true';
+    // Show a redacted URL (never log the full JWT to the DOM) + full URL on hover.
+    const redacted = url.split('?')[0] + '?:jwt=…&:embed=true';
+    const snip = document.getElementById('embedUrlSnippet');
+    snip.textContent = redacted;
+    snip.title = redacted;
 
     iframe.src = url;
   }
@@ -1431,56 +1532,63 @@
     tagSyncLog.innerHTML = rows.join('');
   }
 
+  function readAdminConfig() {
+    return {
+      apiBase:              document.getElementById('apiBase').value.trim(),
+      adminClientId:        document.getElementById('adminClientId').value.trim(),
+      adminClientSecret:    document.getElementById('adminClientSecret').value.trim(),
+      canonicalWorkbookId:  document.getElementById('canonicalWorkbookId').value.trim(),
+      canonicalWorkbookUrl: document.getElementById('canonicalWorkbookUrl').value.trim(),
+    };
+  }
+
+  // The banner is purely client-side: if admin creds + canonical workbook id
+  // are filled in, the buttons will run in live mode. Otherwise dry-run.
+  function updateAdminBanner() {
+    if (!adminBanner) return;
+    const cfg = readAdminConfig();
+    const live = cfg.adminClientId && cfg.adminClientSecret && cfg.canonicalWorkbookId;
+    if (live) {
+      adminBanner.classList.add('live');
+      adminBanner.innerHTML = 'Live mode — operations will hit the configured Sigma org.';
+    } else {
+      adminBanner.classList.remove('live');
+      adminBanner.innerHTML =
+        'Dry-run mode — fill in <strong>Admin Client ID</strong>, <strong>Admin Client Secret</strong>, and <strong>Canonical Workbook ID</strong> above to enable live mode.';
+    }
+  }
+
   async function runAdminAction(endpoint) {
     syncTagsBtn.disabled = true;
     propagateBtn.disabled = true;
     tagSyncLog.innerHTML = '<div class="log-empty">Running…</div>';
 
     try {
-      const res = await fetch(endpoint, { method: 'POST' });
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(readAdminConfig()),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         renderLog({ dryRun: data.dryRun, events: data.events || [], error: data.error || `HTTP ${res.status}` });
       } else {
         renderLog(data);
-        // Update the banner based on what we observed.
-        if (data.dryRun) {
-          adminBanner.classList.remove('live');
-          adminBanner.innerHTML =
-            'Dry-run mode — set <code>SIGMA_CLIENT_ID</code> and <code>SIGMA_CLIENT_SECRET</code> on the server to make real API calls.';
-        } else {
-          adminBanner.classList.add('live');
-          adminBanner.innerHTML = 'Live mode — operations hit the configured Sigma org.';
-        }
       }
     } catch (err) {
       renderLog({ events: [], error: err.message });
     } finally {
       syncTagsBtn.disabled = false;
       propagateBtn.disabled = false;
+      updateAdminBanner();
     }
   }
 
   syncTagsBtn.addEventListener('click', () => runAdminAction('/api/sync-tags'));
   propagateBtn.addEventListener('click', () => runAdminAction('/api/propagate-template'));
 
-  // Read-only probe to set the banner. /api/sync-status only inspects whether
-  // credentials are configured; it never performs Sigma API calls.
-  fetch('/api/sync-status')
-    .then((r) => r.json().catch(() => ({})))
-    .then((data) => {
-      if (data.dryRun) {
-        adminBanner.classList.remove('live');
-        adminBanner.innerHTML =
-          'Dry-run mode — set <code>SIGMA_CLIENT_ID</code> and <code>SIGMA_CLIENT_SECRET</code> on the server to make real API calls.';
-      } else {
-        adminBanner.classList.add('live');
-        adminBanner.innerHTML = 'Live mode — operations hit the configured Sigma org.';
-      }
-    })
-    .catch(() => {
-      adminBanner.innerHTML = 'Could not reach the sync endpoint. Is the server running?';
-    });
+  // Initial banner state, derived purely from form values.
+  updateAdminBanner();
 
   // ---------------------------------------------------------------------------
   // Tab navigation (Embed / About / Setup)
