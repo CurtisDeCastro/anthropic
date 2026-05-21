@@ -870,11 +870,20 @@
   <div class="doc-page">
     <h1>About this app</h1>
     <p class="lede">
-      This is a proof-of-concept for embedding per-customer Sigma workbooks
-      using JWT-signed URLs. It demonstrates a small but useful pattern: a
-      shared <strong>base spec</strong> that composes additional columns per
-      customer at request time, so the customer-specific schema can eventually
-      be driven by a mapping table rather than hand-maintained workbooks.
+      This is a working proof-of-concept for embedding per-customer Sigma
+      workbooks via JWT-signed URLs against a <strong>single canonical workbook
+      with per-customer version tags</strong>. A shared
+      <code>BASE_COLUMNS</code> spec composes with each customer's overlay
+      (<code>extraColumns</code> in <code>CUSTOMER_CONFIG</code>), gets pushed
+      to Sigma as a tagged version of the canonical workbook, and is then
+      embedded via <code>/tag/&lt;tagName&gt;</code>. The customer-specific
+      schema can be driven by a mapping table later — only
+      <code>CUSTOMER_CONFIG</code> needs to change.
+    </p>
+    <p class="lede" style="margin-top:-12px;">
+      The companion to this page is the
+      <a href="https://github.com/sigmacomputing/" style="color:var(--sigma-purple);" target="_blank" rel="noopener">PRD in <code>docs/prd.md</code></a>,
+      which captures the full architectural design and rollout plan.
     </p>
 
     <h2>Request flow</h2>
@@ -907,15 +916,15 @@
         <text x="450" y="86" text-anchor="middle" font-size="11" fill="#6b7280" font-family="-apple-system, sans-serif">server.js · /api/embed-url</text>
 
         <rect x="360" y="110" width="180" height="44" rx="6" fill="#f3f4f6"/>
-        <text x="450" y="130" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">buildSpec(customer)</text>
-        <text x="450" y="146" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">base cols + customer cols</text>
+        <text x="450" y="130" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">tagNameFor(customer)</text>
+        <text x="450" y="146" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">e.g. customer-customer-a</text>
 
         <rect x="360" y="166" width="180" height="44" rx="6" fill="#f3f4f6"/>
         <text x="450" y="186" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">jwt.sign(claims, secret)</text>
         <text x="450" y="202" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">HS256, kid = clientId</text>
 
         <rect x="360" y="222" width="180" height="44" rx="6" fill="#f3f4f6"/>
-        <text x="450" y="242" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">build embed URL</text>
+        <text x="450" y="242" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a1a2e" font-family="SF Mono, monospace">canonicalUrl + /tag/&lt;name&gt;</text>
         <text x="450" y="258" text-anchor="middle" font-size="10" fill="#6b7280" font-family="-apple-system, sans-serif">…?:jwt=…&amp;:embed=true</text>
 
         <rect x="360" y="278" width="180" height="28" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
@@ -930,8 +939,8 @@
         <!-- Arrow 1: Browser → Server -->
         <line x1="222" y1="68" x2="335" y2="68" stroke="#5f4fdb" stroke-width="2" marker-end="url(#arrow-purple)"/>
         <text x="278" y="58" text-anchor="middle" font-size="11" font-weight="700" fill="#5f4fdb" font-family="-apple-system, sans-serif">① POST</text>
-        <text x="278" y="82" text-anchor="middle" font-size="9" fill="#6b7280" font-family="SF Mono, monospace">{ clientId, secret,</text>
-        <text x="278" y="94" text-anchor="middle" font-size="9" fill="#6b7280" font-family="SF Mono, monospace">  email, customer }</text>
+        <text x="278" y="82" text-anchor="middle" font-size="9" fill="#6b7280" font-family="SF Mono, monospace">{ clientId, secret, email,</text>
+        <text x="278" y="94" text-anchor="middle" font-size="9" fill="#6b7280" font-family="SF Mono, monospace">  customer, canonicalWorkbookUrl }</text>
 
         <!-- Arrow 2: Server → Browser -->
         <line x1="335" y1="110" x2="222" y2="110" stroke="#5f4fdb" stroke-width="2" marker-end="url(#arrow-purple)"/>
@@ -946,18 +955,20 @@
     </div>
 
     <ol>
-      <li>The browser <code>POST</code>s the embed credentials, embed-user email, and selected customer to <code>/api/embed-url</code>.</li>
-      <li>The server looks up the customer's workbook URL, composes the spec, signs a JWT with the embed secret, and returns the final URL.</li>
-      <li>The browser sets the iframe <code>src</code> directly to that URL. The server is no longer involved — Sigma validates the token and serves the workbook to the iframe.</li>
+      <li>The browser <code>POST</code>s the embed credentials, embed-user email, selected customer, and Sigma Org Configuration (canonical workbook URL + ID) to <code>/api/embed-url</code>. All values come from the on-page form, persisted via <code>localStorage</code>.</li>
+      <li>The server resolves the customer's tag (<code>customer-&lt;slug&gt;</code>, or <code>template</code> for the Template target), appends <code>/tag/&lt;tagName&gt;</code> to the canonical workbook URL, signs the JWT, and returns the final URL. No Sigma API calls happen on this hot path — the spec push + tag application were done offline by the sync script (see Figure 2).</li>
+      <li>The browser sets the iframe <code>src</code> directly to that URL. The server is no longer involved — Sigma validates the token and serves the tagged workbook version to the iframe.</li>
     </ol>
 
-    <h2>Spec composition</h2>
+    <h2>Spec composition (sync flow)</h2>
     <p>
-      Today the two specs are checked into <code>server.js</code> as a static
-      <code>CUSTOMER_CONFIG</code> object. The interesting part is the seam:
-      every spec is composed at request time from a shared base plus a
-      per-customer column list. Swap the static object for a database lookup
-      and the rest of the pipeline doesn't change.
+      The customer specs live in a static <code>CUSTOMER_CONFIG</code> object
+      in <code>lib/embed.js</code>. The interesting part is the seam: every
+      spec is composed by <code>buildSpec(customer)</code> from a shared base
+      plus a per-customer column list, then pushed to the canonical workbook
+      and tagged. Swap the static object for a database lookup and the rest
+      of the pipeline doesn't change. The diagram below shows the sync flow
+      driven by the two buttons in the Setup tab.
     </p>
 
     <div class="diagram-wrap">
@@ -978,7 +989,7 @@
         <text x="310" y="92" font-size="11" fill="#0c4a6e" font-family="SF Mono, monospace">• ORDER_NUMBER</text>
         <text x="440" y="92" font-size="11" fill="#0c4a6e" font-family="SF Mono, monospace">• SKU_NUMBER</text>
         <text x="540" y="92" font-size="11" fill="#0c4a6e" font-family="SF Mono, monospace">• CUST_JSON</text>
-        <text x="450" y="115" text-anchor="middle" font-size="10" fill="#0369a1" font-family="-apple-system, sans-serif" font-style="italic">— defined once in server.js</text>
+        <text x="450" y="115" text-anchor="middle" font-size="10" fill="#0369a1" font-family="-apple-system, sans-serif" font-style="italic">— defined once in lib/embed.js</text>
 
         <!-- buildSpec() merge node -->
         <rect x="370" y="158" width="160" height="42" rx="21" fill="#1e293b" stroke="#475569" stroke-width="1"/>
@@ -994,72 +1005,115 @@
         <text x="180" y="193" text-anchor="middle" font-size="10" fill="#64748b" font-family="-apple-system, sans-serif" font-style="italic">today: static map · future: DB lookup</text>
         <line x1="320" y1="179" x2="365" y2="179" stroke="#475569" stroke-width="2" marker-end="url(#arrow-slate)"/>
 
-        <!-- Branches: A and B -->
-        <line x1="410" y1="200" x2="200" y2="240" stroke="#d97706" stroke-width="2" marker-end="url(#arrow-amber)"/>
-        <line x1="490" y1="200" x2="700" y2="240" stroke="#d97706" stroke-width="2" marker-end="url(#arrow-amber)"/>
-        <text x="290" y="225" text-anchor="middle" font-size="10" font-weight="700" fill="#d97706" font-family="-apple-system, sans-serif">if "Customer A"</text>
-        <text x="610" y="225" text-anchor="middle" font-size="10" font-weight="700" fill="#d97706" font-family="-apple-system, sans-serif">if "Customer B"</text>
+        <!-- Per-call API ops node -->
+        <rect x="270" y="222" width="360" height="44" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+        <text x="450" y="242" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff" font-family="SF Mono, monospace">PUT /v2/workbooks/{id}/spec  +  POST /v2/workbooks/tag</text>
+        <text x="450" y="258" text-anchor="middle" font-size="9" fill="#cbd5e1" font-family="-apple-system, sans-serif">push spec → apply tagName (one HTTP pair per customer)</text>
 
-        <!-- Customer A box -->
-        <rect x="40" y="245" width="320" height="180" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-        <text x="200" y="272" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">Customer A spec</text>
-        <text x="60" y="298" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">+ AGE_GROUP</text>
-        <text x="60" y="314" font-size="10" fill="#a16207" font-family="SF Mono, monospace">Text([Cust Json].AGE_GROUP)</text>
+        <line x1="450" y1="200" x2="450" y2="220" stroke="#475569" stroke-width="2" marker-end="url(#arrow-slate)"/>
 
-        <rect x="60" y="335" width="280" height="38" rx="6" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
-        <text x="200" y="352" text-anchor="middle" font-size="10" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">workbook URL</text>
-        <text x="200" y="367" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">…/workbook/Customer-A-2D2ps4…</text>
+        <!-- One canonical workbook with three tagged branches -->
+        <rect x="80" y="290" width="740" height="130" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+        <text x="450" y="316" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">One canonical workbook in Sigma</text>
+        <text x="450" y="332" text-anchor="middle" font-size="10" fill="#a16207" font-family="-apple-system, sans-serif" font-style="italic">…/workbook/&lt;canonical-id&gt; — same document, three immutable tagged versions</text>
 
-        <text x="200" y="395" text-anchor="middle" font-size="10" fill="#a16207" font-family="-apple-system, sans-serif" font-style="italic">— passed to JWT signer →</text>
+        <!-- Three tag pills -->
+        <rect x="110" y="350" width="220" height="56" rx="8" fill="#ffffff" stroke="#fed7aa" stroke-width="1.5"/>
+        <text x="220" y="370" text-anchor="middle" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">tag: template</text>
+        <text x="220" y="386" text-anchor="middle" font-size="9" fill="#a16207" font-family="-apple-system, sans-serif">base columns only</text>
+        <text x="220" y="400" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">/tag/template</text>
 
-        <!-- Customer B box -->
-        <rect x="540" y="245" width="320" height="180" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-        <text x="700" y="272" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">Customer B spec</text>
-        <text x="560" y="298" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">+ Birthday</text>
-        <text x="560" y="314" font-size="10" fill="#a16207" font-family="SF Mono, monospace">Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)</text>
+        <rect x="340" y="350" width="220" height="56" rx="8" fill="#ffffff" stroke="#fed7aa" stroke-width="1.5"/>
+        <text x="450" y="370" text-anchor="middle" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">tag: customer-customer-a</text>
+        <text x="450" y="386" text-anchor="middle" font-size="9" fill="#a16207" font-family="-apple-system, sans-serif">+ AGE_GROUP</text>
+        <text x="450" y="400" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">/tag/customer-customer-a</text>
 
-        <rect x="560" y="335" width="280" height="38" rx="6" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
-        <text x="700" y="352" text-anchor="middle" font-size="10" font-weight="700" fill="#92400e" font-family="-apple-system, sans-serif">workbook URL</text>
-        <text x="700" y="367" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">…/workbook/Customer-B-52yQjg…</text>
+        <rect x="570" y="350" width="220" height="56" rx="8" fill="#ffffff" stroke="#fed7aa" stroke-width="1.5"/>
+        <text x="680" y="370" text-anchor="middle" font-size="11" font-weight="700" fill="#92400e" font-family="SF Mono, monospace">tag: customer-customer-b</text>
+        <text x="680" y="386" text-anchor="middle" font-size="9" fill="#a16207" font-family="-apple-system, sans-serif">+ Birthday</text>
+        <text x="680" y="400" text-anchor="middle" font-size="9" fill="#a16207" font-family="SF Mono, monospace">/tag/customer-customer-b</text>
 
-        <text x="700" y="395" text-anchor="middle" font-size="10" fill="#a16207" font-family="-apple-system, sans-serif" font-style="italic">— passed to JWT signer →</text>
+        <!-- Push-down arrow -->
+        <line x1="450" y1="266" x2="450" y2="288" stroke="#d97706" stroke-width="2" marker-end="url(#arrow-amber)"/>
 
         <!-- Bottom note -->
-        <rect x="200" y="430" width="500" height="26" rx="4" fill="#f3f4f6" stroke="#d1d5db" stroke-width="1"/>
+        <rect x="180" y="430" width="540" height="26" rx="4" fill="#f3f4f6" stroke="#d1d5db" stroke-width="1"/>
         <text x="450" y="447" text-anchor="middle" font-size="11" fill="#374151" font-family="-apple-system, sans-serif">
           🚀  Production path: replace the static map with a customer ID → column overrides table
         </text>
       </svg>
-      <div class="diagram-caption">Figure 2 — Spec composition. Base columns are defined once; per-customer columns are merged in at request time.</div>
+      <div class="diagram-caption">Figure 2 — Sync flow. Base + per-customer overlay → one PUT spec + one tag call → one workbook, N immutable tagged versions.</div>
     </div>
 
     <p>
-      The shape <code>buildSpec()</code> returns mirrors what the Sigma
-      <code>GET&nbsp;/workbooks/:id</code> endpoint produces — but only
-      <code>pages</code> and <code>layout</code> matter when pushing back into
-      Sigma. Read-only metadata fields like <code>workbookId</code>,
-      <code>ownerId</code>, and timestamps are stripped server-side and aren't
-      part of the create/update payload.
+      Embed users never touch separate workbook documents — Customer A and
+      Customer B both see the same canonical workbook, just at different
+      version-tagged URLs. Adding a third customer is a
+      <code>CUSTOMER_CONFIG</code> edit plus one button click.
     </p>
 
     <h2>Why server-side signing?</h2>
     <p>
       The JWT is signed with your embed secret. That secret must never reach
       the browser, so <code>/api/embed-url</code> is the only place it lives
-      in memory. The frontend only ever sees the final signed URL.
+      in memory. The frontend only ever sees the final signed URL. The same
+      principle applies to the <strong>admin</strong> OAuth credentials that
+      drive the Setup-tab sync buttons — they're signed against
+      <code>POST /v2/auth/token</code> on the server, not the browser.
     </p>
     <div class="callout callout-warn">
-      <strong>Demo caveat:</strong> this POC collects the client ID and secret
-      from a form so you can try it without re-deploying. In production, store
-      them as server-side environment variables (e.g. <code>SIGMA_CLIENT_ID</code>,
-      <code>SIGMA_SECRET</code>) and remove the form fields entirely.
+      <strong>Demo caveat:</strong> this POC collects every credential and
+      Sigma org config value via on-page form fields so you can try it
+      against any Sigma org without re-deploying. The form values persist
+      in <code>localStorage</code> (with the two secret fields intentionally
+      <em>not</em> persisted). In production, move the embed and admin
+      credentials into server-side environment variables and remove those
+      form fields. The canonical workbook ID / URL can stay in the form or
+      move to env — they aren't sensitive.
     </div>
+
+    <h2>Customers and tags in this demo</h2>
+    <ul>
+      <li><strong>Customer A</strong> → tag <code>customer-customer-a</code> → adds <code>AGE_GROUP</code> column from <code>Text([Cust Json].AGE_GROUP)</code>.</li>
+      <li><strong>Customer B</strong> → tag <code>customer-customer-b</code> → adds <code>Birthday</code> column from <code>Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)</code>.</li>
+      <li><strong>Template</strong> → tag <code>template</code> → the base columns only (<code>ORDER_NUMBER</code>, <code>SKU_NUMBER</code>, <code>CUST_JSON</code>). The clean starting state operators compare customer overlays against.</li>
+    </ul>
+
+    <h2>Data model assumption</h2>
+    <p>
+      The POC assumes a shared base table with a JSON column (<code>CUST_JSON</code>)
+      that each customer extracts different keys from. The demo's customer
+      overlays are derived fields off that JSON. If your real customers
+      diverge beyond "same base table + different JSON keys" — e.g. distinct
+      source tables, materialized intermediates, or joins — lift the
+      customer-specific logic into a Sigma <em>data model</em> instead of
+      the workbook spec, and tag the data model instead. The
+      <code>PUT /v2/dataModels/&#123;id&#125;/spec</code> endpoint is public
+      and documented; <code>dataModelSourceTaggedVersions</code> on
+      <code>POST /v2/workbooks/tag</code> wires the workbook tag to the
+      data-model tag.
+    </p>
+
+    <h2>What this POC does not prove yet</h2>
+    <ul>
+      <li>Performance at production scale, or operational behavior with more than the two customers verified live.</li>
+      <li>Schema drift handling — what happens when <code>BASE_COLUMNS</code> changes in a way an existing customer's extras depend on.</li>
+      <li>Observability beyond the structured operation log shown by the sync buttons.</li>
+      <li>Rollout / version-pinning strategy for spec changes (Sigma's own tag history is the source of truth today; no application-side <code>specVersion</code> field exists).</li>
+      <li>Security hardening beyond the basic JWT pattern — see the demo caveat above.</li>
+    </ul>
 
     <h2>File map</h2>
     <ul>
-      <li><code>server.js</code> — Express server. Holds <code>CUSTOMER_CONFIG</code>, <code>buildSpec()</code>, and the JWT signing logic.</li>
-      <li><code>public/index.html</code> — single-page UI. Form, customer selector, live spec preview, and the embed iframe.</li>
-      <li><code>package.json</code> — runtime deps: <code>express</code>, <code>jsonwebtoken</code>, <code>uuid</code>.</li>
+      <li><code>lib/embed.js</code> — source of truth for <code>CUSTOMER_CONFIG</code>, <code>BASE_COLUMNS</code>, <code>buildSpec()</code>, <code>buildTemplateSpec()</code>, <code>slugify()</code>, <code>tagNameFor()</code>, <code>generateEmbedUrl()</code>, <code>handleEmbedRequest()</code>. No module-level canonical-workbook constant — that ID flows in per-call.</li>
+      <li><code>lib/tag-sync.js</code> — Sigma REST client + reconciliation logic. Used by the CLI script and the two button-backing routes.</li>
+      <li><code>scripts/sync-customer-tags.js</code> — copy-able CLI. <code>--mode customers|template</code>, <code>--customer &lt;id&gt;</code>, <code>--dry-run</code>.</li>
+      <li><code>server.js</code> — Express dev server. <code>/api/embed-url</code>, <code>/api/sync-tags</code>, <code>/api/propagate-template</code>. All config arrives via request body.</li>
+      <li><code>netlify/functions/*.js</code> — matching Netlify Functions for production deploy.</li>
+      <li><code>public/index.html</code> — this page. Two-panel left column, customer selector, live spec preview, Sigma iframe, Setup-tab admin actions.</li>
+      <li><code>test/embed.test.js</code> — Node built-in test runner. <code>npm test</code>.</li>
+      <li><code>docs/about.md</code>, <code>docs/prd.md</code> — long-form docs.</li>
+      <li><code>package.json</code> — npm scripts (<code>start</code>, <code>dev</code>, <code>sync-tags</code>, <code>propagate-template</code>, <code>test</code>). Deps: <code>express</code>, <code>jsonwebtoken</code>, <code>uuid</code>.</li>
     </ul>
   </div>
 </section>
@@ -1071,10 +1125,14 @@
   <div class="doc-page">
     <h1>Setup</h1>
     <p class="lede">
-      You need three things from your Sigma org to run this app: an
-      <strong>embed client ID</strong>, an <strong>embed secret</strong>, and an
-      <strong>embed user email</strong>. The deployed app's URL also needs to
-      be added to Sigma's allowed embed domains list.
+      Two pieces of Sigma plumbing power this app: a JWT-signing
+      <strong>embed credential</strong> for the iframe URL, and an
+      <strong>admin OAuth credential</strong> for the sync operations that
+      push specs and apply version tags. You'll also need to pick an embed
+      user, whitelist the app's origin in Sigma, and create a canonical
+      workbook to target. All of this gets entered into the two on-page
+      forms in the Embed tab — nothing is read from a server-side
+      <code>.env</code> file.
     </p>
 
     <div class="setup-step">
@@ -1089,7 +1147,7 @@
         credential type, and give it a name. Sigma will generate two values:
       </p>
       <ul>
-        <li><strong>Client ID</strong> — a UUID-shaped string. Goes in the <em>Embed Client ID</em> form field.</li>
+        <li><strong>Client ID</strong> — a UUID-shaped string. Goes in the <em>Embed Client ID</em> form field in the Embed tab.</li>
         <li><strong>Secret</strong> — a long random string. Goes in the <em>Embed Secret</em> field. Sigma only shows this <strong>once</strong> — copy it now.</li>
       </ul>
       <div class="callout">
@@ -1100,7 +1158,31 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">2</span>Pick an embed user</h2>
+      <h2><span class="step-num">2</span>Generate admin OAuth credentials</h2>
+      <p>
+        This is a <strong>separate</strong> credential from step 1. The embed
+        credential signs the JWT in the iframe URL; the admin credential
+        authenticates the sync operations that push specs and apply version
+        tags via <code>POST /v2/auth/token</code>.
+      </p>
+      <p>
+        In the same Developer Access screen, click <strong>Create New</strong>
+        again and choose <strong>REST API</strong> (sometimes labelled
+        <em>API token</em>) as the credential type. You'll get a Client ID
+        and a Secret again — these go in the <em>Admin Client ID</em> and
+        <em>Admin Client Secret</em> fields of the Sigma Org Configuration
+        panel.
+      </p>
+      <div class="callout callout-warn">
+        <strong>Scope it down if you can.</strong> The admin credential needs
+        permission to push workbook specs (<code>PUT /v2/workbooks/&#123;id&#125;/spec</code>)
+        and apply tags (<code>POST /v2/workbooks/tag</code>) on the canonical
+        workbook only. Don't use an org-wide admin token in production.
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <h2><span class="step-num">3</span>Pick an embed user</h2>
       <p>
         The JWT's <code>sub</code> claim identifies the user the embed session
         runs as. Two options:
@@ -1120,7 +1202,7 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">3</span>Whitelist the app's origin</h2>
+      <h2><span class="step-num">4</span>Whitelist the app's origin</h2>
       <p>
         Sigma refuses to render the iframe unless the parent page's origin is
         on the embed allow-list. In Sigma admin, find
@@ -1139,32 +1221,51 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">4</span>Wire up your own workbooks (optional)</h2>
+      <h2><span class="step-num">5</span>Create the canonical workbook and fill in Sigma Org Configuration</h2>
       <p>
-        Out of the box this POC points at two demo workbooks
-        (<em>Customer A</em>, <em>Customer B</em>) in the
-        <code>test-drive-staging-oai-demo</code> org. To use your own,
-        edit <code>server.js</code> and replace the two
-        <code>workbookUrl</code> values inside <code>CUSTOMER_CONFIG</code>.
+        Create <strong>one</strong> workbook in Sigma that will become the
+        target of every version tag. Make sure it has the same structure
+        <code>BASE_COLUMNS</code> in <code>lib/embed.js</code> expects: one
+        page, one table element, the three shared columns (<code>ORDER_NUMBER</code>,
+        <code>SKU_NUMBER</code>, <code>CUST_JSON</code>) sourced from
+        <code>PLUGS_ELECTRONICS_HANDS_ON_LAB_DATA</code> (or your equivalent
+        warehouse table — update <code>BASE_SOURCE</code> in
+        <code>lib/embed.js</code> if so).
       </p>
-      <p>The URL format Sigma's JWT embed accepts:</p>
       <p>
-        <code>https://&lt;sigma-host&gt;/&lt;org-slug&gt;/workbook/&lt;workbook-name&gt;-&lt;workbook-id&gt;</code>
+        Copy the workbook URL and ID into the
+        <strong>Sigma Org Configuration</strong> panel in the Embed tab:
+      </p>
+      <ul>
+        <li><strong>API Base</strong> — your Sigma host's API base, e.g. <code>https://aws-api.sigmacomputing.com</code>.</li>
+        <li><strong>Admin Client ID</strong> / <strong>Admin Client Secret</strong> — from step 2.</li>
+        <li><strong>Canonical Workbook ID</strong> — the UUID. Get it from <code>GET /v2/workbooks</code> or from the workbook URL.</li>
+        <li><strong>Canonical Workbook URL</strong> — the full browser URL, e.g. <code>https://&lt;org&gt;.sigmacomputing.io/&lt;slug&gt;/workbook/Embed-&lt;id&gt;</code>.</li>
+      </ul>
+      <p>
+        These five values are saved to <code>localStorage</code> so you don't
+        retype them every refresh. The two secret fields (embed secret + admin
+        client secret) are intentionally <strong>not</strong> persisted.
       </p>
       <p>
-        You can also adjust the columns each customer sees — base columns live
-        in <code>BASE_COLUMNS</code>, per-customer extras live in
-        <code>CUSTOMER_CONFIG.&lt;name&gt;.extraColumns</code>.
+        To customize what each customer sees, edit
+        <code>CUSTOMER_CONFIG</code> in <code>lib/embed.js</code>:
       </p>
+      <ul>
+        <li>Base columns live in <code>BASE_COLUMNS</code>.</li>
+        <li>Per-customer extras live in <code>CUSTOMER_CONFIG.&lt;name&gt;.extraColumns</code>.</li>
+        <li>Each customer's tag name can be set explicitly with <code>CUSTOMER_CONFIG.&lt;name&gt;.tagName</code>, or omitted to use the default slug (e.g. <code>customer-acme-co</code> for <code>"Acme Co"</code>).</li>
+      </ul>
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">5</span>Sync customer version tags</h2>
+      <h2><span class="step-num">6</span>Sync customer version tags</h2>
       <p>
-        The production architecture (see <code>docs/prd.md</code>) collapses the
-        two demo workbooks into a single canonical workbook with per-customer
-        <strong>version tags</strong>. The buttons below drive that reconciliation
-        without anyone having to click around in the Sigma UI.
+        With the canonical workbook in place and Sigma Org Configuration
+        filled in, the buttons below drive the entire reconciliation —
+        spec push + tag application — without anyone having to click around
+        in the Sigma UI. See <code>docs/prd.md</code> for the full
+        architectural design.
       </p>
       <ul>
         <li>
@@ -1221,21 +1322,36 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">6</span>Run it</h2>
+      <h2><span class="step-num">7</span>Run it</h2>
       <p>From the project root:</p>
       <p>
         <code>npm install</code><br/>
+        <code>npm test</code> &nbsp;<em>(optional, runs the smoke tests)</em><br/>
         <code>npm start</code>
       </p>
       <p>
-        Open <code>http://localhost:3000</code>, paste your credentials and
-        embed-user email, pick a customer, and click <strong>Generate Embed</strong>.
+        Open <code>http://localhost:3000</code>. Fill in <strong>Sigma Org
+        Configuration</strong> and <strong>Embed Configuration</strong>, pick
+        a customer (Customer A, Customer B, or Template), and click
+        <strong>Generate Embed</strong>.
       </p>
+      <p>
+        Equivalent CLI invocations for the sync operations (CI-friendly,
+        reads <code>SIGMA_*</code> env vars):
+      </p>
+      <ul>
+        <li><code>npm run sync-tags</code> — sync all customer tags from config.</li>
+        <li><code>npm run propagate-template</code> — push the base spec to <code>template</code>, then re-sync every customer tag.</li>
+        <li><code>node scripts/sync-customer-tags.js --customer "Customer A" --dry-run</code> — single-customer dry run.</li>
+      </ul>
       <div class="callout">
-        <strong>For production:</strong> move <code>SIGMA_CLIENT_ID</code> and
-        <code>SIGMA_SECRET</code> into environment variables and remove the
-        form fields. The signing endpoint should be the only place the secret
-        appears.
+        <strong>For production:</strong> move <code>SIGMA_CLIENT_ID</code> /
+        <code>SIGMA_SECRET</code> (embed signing) and the admin OAuth
+        credentials into server-side environment variables, and remove the
+        secret form fields. The canonical workbook ID and URL can stay in
+        the form (they aren't sensitive) or move to env. Either way, the
+        signing endpoint and the sync handlers should be the only places
+        the secrets ever appear.
       </div>
     </div>
   </div>

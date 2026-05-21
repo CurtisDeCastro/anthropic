@@ -48,24 +48,23 @@ Those items are the main areas that would need to be filled in before using this
 
 Three actors are involved:
 
-- the **browser**, which collects inputs and renders the iframe,
-- the **Express server** (or Netlify Function in production), which holds the embed secret and signs the JWT, and
+- the **browser**, which collects inputs (Sigma org config + embed user context) and renders the iframe,
+- the **Express server** (or Netlify Function in production), which receives all config in the request body and signs the JWT, and
 - **Sigma**, which validates the token and serves the embedded workbook.
 
 The flow is:
 
-1. The browser collects the selected customer and embed-user context.
-2. The browser sends a `POST` request to `/api/embed-url`.
-3. The server looks up that customer's workbook metadata.
-4. The server composes the workbook spec from the shared base plus the customer-specific column configuration.
-5. The server signs a JWT using the Sigma embed secret.
-6. The server returns the final embed URL.
-7. The browser sets `iframe.src` to that URL.
-8. Sigma validates the JWT and renders the workbook.
+1. The browser reads the Sigma Org Configuration (API base, admin creds, canonical workbook id/URL) and Embed Configuration (embed client id/secret, embed-user email, selected customer) from the on-page form, both backed by `localStorage` so they survive a refresh.
+2. The browser sends a `POST` to `/api/embed-url` with everything needed to mint the URL — including `canonicalWorkbookUrl` and the selected customer.
+3. The server resolves the customer's tag name (`customer-<slug>`, or `template` for the special Template target) via `tagNameFor()`.
+4. The server appends `/tag/<tagName>` to the canonical workbook URL and signs a JWT using the embed secret.
+5. The server returns the final embed URL.
+6. The browser sets `iframe.src` to that URL.
+7. Sigma validates the JWT and renders the tagged workbook version.
 
-Once the signed URL is returned, the app server is no longer in the rendering path. The browser talks directly to Sigma through the iframe.
+No Sigma API calls happen in this hot path — the spec push and tag application were done offline by the sync script (see [Spec composition](#spec-composition)). Once the signed URL is returned, the app server is no longer in the rendering path. The browser talks directly to Sigma through the iframe.
 
-**Important security property:** in production, the embed secret only ever exists on the server. The current demo collects it via a form to make the POC easy to run without redeploying — see the warning in the UI. In any real deployment, credentials move to server-side environment variables and the form fields are removed.
+**Security model.** In production, both the embed signing secret and the admin OAuth secret should live on the server only. This demo collects them via on-page form fields to make the POC easy to run against any Sigma org without re-deploying — see the warning banners in the UI. In any real deployment, credentials move to server-side environment variables and the form fields are removed.
 
 ---
 
@@ -90,12 +89,15 @@ Each customer has a small configuration object that defines:
 - which custom column(s) to expose,
 - how those columns are derived from `CUST_JSON`,
 - what labels should be shown in the workbook, and
-- which workbook URL should be used.
+- which version-tag name this customer's embed targets (e.g. `customer-customer-a`).
+
+The canonical workbook URL itself is **not** per-customer — every customer embed targets the same workbook, just at a different `/tag/<name>`.
 
 In the current demo:
 
 - **Customer A** exposes the `AGE_GROUP` column, derived from `Text([Cust Json].AGE_GROUP)`
 - **Customer B** exposes the `Birthday` column, derived from `Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)`
+- **Template** is a special embed target alongside the two customers — it loads the base-columns-only spec at the `template` tag. Useful for demos and as the "clean starting state" operators compare customer overlays against.
 
 The important design choice is that the customer-specific logic is metadata-driven — it lives in one configuration object (`CUSTOMER_CONFIG` in `lib/embed.js`), not scattered across the codebase.
 
@@ -130,15 +132,18 @@ The two flows are:
 2. Look up the selected customer in `CUSTOMER_CONFIG`
 3. Append `extraColumns` to produce the per-customer spec
 4. `POST /v2/tags` to ensure the version tag exists (idempotent)
-5. `PUT /v2/workbooks/{CANONICAL.workbookId}/spec` with the composed spec
+5. `PUT /v2/workbooks/{canonicalWorkbookId}/spec` with the composed spec
 6. `POST /v2/workbooks/tag` to apply `tagName` to the new published version
+
+The canonical workbook ID flows in at call time — from the request body (web UI) or from `SIGMA_CANONICAL_WORKBOOK_ID` (CLI). The library has no module-level constant for it, so the same code runs against any Sigma org without rebuild.
 
 **Embed (online, at request time):**
 
-1. Look up `tagName` in `CUSTOMER_CONFIG`
-2. Construct `${CANONICAL.workbookUrl}/tag/${tagName}`
-3. Sign a JWT and append `?:jwt=<token>&:embed=true`
-4. Return the URL — done in one HMAC sign, no Sigma API calls
+1. Read `canonicalWorkbookUrl` from the request body
+2. Look up `tagName` in `CUSTOMER_CONFIG` (or use `template` for the Template target)
+3. Strip any existing query string from the canonical URL and append `/tag/${tagName}`
+4. Sign a JWT and append `?:jwt=<token>&:embed=true`
+5. Return the URL — done in one HMAC sign, no Sigma API calls
 
 The intended production path replaces step 2 of the sync flow with a database-backed mapping table lookup; nothing else changes.
 
@@ -154,7 +159,10 @@ For that reason:
 - the browser should only receive the final signed URL,
 - credentials should not be collected through the frontend in production.
 
-The current form-based credential input exists only to make the POC easy to run without redeploying. For any real deployment, move credentials to environment variables and remove those form fields from the UI.
+The two on-page panels (Sigma Org Configuration + Embed Configuration) exist only to make the POC easy to run against any Sigma org without redeploying. They persist to `localStorage` so you don't retype them every refresh, but the secret fields (embed secret, admin client secret) are intentionally **not** persisted. For any real deployment:
+
+- Move `SIGMA_CLIENT_ID` / `SIGMA_SECRET` (embed signing) and `SIGMA_ADMIN_CLIENT_ID` / `SIGMA_ADMIN_CLIENT_SECRET` (admin operations) into server-side environment variables.
+- Remove the credential fields from the form. The canonical workbook ID / URL can stay in the form, or move to env — they aren't sensitive.
 
 ---
 
@@ -224,14 +232,14 @@ Sigma's own version-tag system is the source of truth for "what each customer wa
 
 | File | Role |
 |---|---|
-| `lib/embed.js` | Source of truth for `CUSTOMER_CONFIG`, `BASE_COLUMNS`, `CANONICAL`, `buildSpec()`, `buildTemplateSpec()`, `slugify()`, `tagNameFor()`, `generateEmbedUrl()`, and `handleEmbedRequest()`. Module-load slug-collision guard runs here. |
-| `lib/tag-sync.js` | Sigma REST client + reconciliation logic. `makeClient`, `ensureTagExists`, `pushWorkbookSpec`, `tagWorkbookVersion`, `syncCustomer`, `syncAllCustomers`, `pushTemplate`, `propagateTemplate`. Used by the CLI and the two button-backing routes. |
-| `scripts/sync-customer-tags.js` | Copy-able CLI. `--mode customers\|template`, `--customer <id>`, `--dry-run`. Auto dry-runs when admin credentials are absent. |
+| `lib/embed.js` | Source of truth for `CUSTOMER_CONFIG`, `BASE_COLUMNS`, `buildSpec()`, `buildTemplateSpec()`, `slugify()`, `tagNameFor()`, `generateEmbedUrl()`, and `handleEmbedRequest()`. Module-load slug-collision guard runs here. **No** module-level canonical-workbook constant — that ID flows in per-call from the request body or CLI env. |
+| `lib/tag-sync.js` | Sigma REST client + reconciliation logic. `makeClient`, `ensureTagExists`, `pushWorkbookSpec`, `tagWorkbookVersion`, `syncCustomer`, `syncAllCustomers`, `pushTemplate`, `propagateTemplate`. Used by the CLI and the two button-backing routes. All higher-level operations take `workbookId` as an explicit arg. |
+| `scripts/sync-customer-tags.js` | Copy-able CLI. `--mode customers\|template`, `--customer <id>`, `--dry-run`. Auto dry-runs when admin credentials are absent. Reads `SIGMA_*` env vars for CLI use; no `.env` file convention required. |
 | `test/embed.test.js` | Node built-in test runner. Smoke tests on slugify, build*, stripSpecForPush, tag-name resolution, and the collision guard. Run with `npm test`. |
-| `server.js` | Express dev server: `/api/embed-url`, `/api/sync-tags`, `/api/propagate-template`, `/api/sync-status`. |
+| `server.js` | Express dev server: `/api/embed-url`, `/api/sync-tags`, `/api/propagate-template`. All Sigma config flows in via request body — the server itself reads nothing per-org from env. |
 | `netlify/functions/*.js` | Matching Netlify Functions for production deploy. |
 | `netlify.toml` | Netlify deploy config. Publishes `public/`, routes `/api/*` to functions. |
-| `public/index.html` | Single-page frontend: credential form, customer selector, live spec preview, Sigma iframe, Setup-tab admin actions. |
+| `public/index.html` | Single-page frontend: two-panel left column (Sigma Org Configuration + Embed Configuration with localStorage-backed form fields), customer selector with `Customer A` / `Customer B` / `Template`, live spec preview, Sigma iframe, Setup-tab admin actions + structured operation log. |
 | `package.json` | npm scripts (`start`, `dev`, `sync-tags`, `propagate-template`, `test`). Deps: `express`, `jsonwebtoken`, `uuid`. |
 
 ---
