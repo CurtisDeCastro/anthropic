@@ -64,7 +64,7 @@ The flow is:
 
 No Sigma API calls happen in this hot path — the spec push and tag application were done offline by the sync script (see [Spec composition](#spec-composition)). Once the signed URL is returned, the app server is no longer in the rendering path. The browser talks directly to Sigma through the iframe.
 
-**Security model.** In production, both the embed signing secret and the admin OAuth secret should live on the server only. This demo collects them via on-page form fields to make the POC easy to run against any Sigma org without re-deploying — see the warning banners in the UI. In any real deployment, credentials move to server-side environment variables and the form fields are removed.
+**Security model.** A single Sigma client credential (Client ID + Secret) signs the embed JWT *and* authenticates the OAuth `client_credentials` grant for the Setup-tab sync operations — the demo consolidates both purposes onto one credential pair to keep the UI simple. In production, that pair should live on the server only. This demo collects it via an on-page form field to make the POC easy to run against any Sigma org without re-deploying — see the warning banner in the UI. In any real deployment, credentials move to server-side environment variables and the form fields are removed.
 
 ---
 
@@ -159,9 +159,9 @@ For that reason:
 - the browser should only receive the final signed URL,
 - credentials should not be collected through the frontend in production.
 
-The two on-page panels (Sigma Org Configuration + Embed Configuration) exist only to make the POC easy to run against any Sigma org without redeploying. They persist to `localStorage` so you don't retype them every refresh, but the secret fields (embed secret, admin client secret) are intentionally **not** persisted. For any real deployment:
+The single Sigma Configuration panel on the page exists only to make the POC easy to run against any Sigma org without redeploying. Form values persist to `localStorage` so you don't retype them every refresh, but the Client Secret field is intentionally **not** persisted. For any real deployment:
 
-- Move `SIGMA_CLIENT_ID` / `SIGMA_SECRET` (embed signing) and `SIGMA_ADMIN_CLIENT_ID` / `SIGMA_ADMIN_CLIENT_SECRET` (admin operations) into server-side environment variables.
+- Move `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET` into server-side environment variables.
 - Remove the credential fields from the form. The canonical workbook ID / URL can stay in the form, or move to env — they aren't sensitive.
 
 ---
@@ -239,7 +239,7 @@ Sigma's own version-tag system is the source of truth for "what each customer wa
 | `server.js` | Express dev server: `/api/embed-url`, `/api/sync-tags`, `/api/propagate-template`. All Sigma config flows in via request body — the server itself reads nothing per-org from env. |
 | `netlify/functions/*.js` | Matching Netlify Functions for production deploy. |
 | `netlify.toml` | Netlify deploy config. Publishes `public/`, routes `/api/*` to functions. |
-| `public/index.html` | Single-page frontend: two-panel left column (Sigma Org Configuration + Embed Configuration with localStorage-backed form fields), customer selector with `Customer A` / `Customer B` / `Template`, live spec preview, Sigma iframe, Setup-tab admin actions + structured operation log. |
+| `public/index.html` | Single-page frontend: one consolidated Sigma Configuration panel (org setup + per-embed context, localStorage-backed), customer selector with `Customer A` / `Customer B` / `Template`, live spec preview, Sigma iframe, Setup-tab admin actions + structured operation log. |
 | `package.json` | npm scripts (`start`, `dev`, `sync-tags`, `propagate-template`, `test`). Deps: `express`, `jsonwebtoken`, `uuid`. |
 
 ---

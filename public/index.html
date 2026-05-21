@@ -698,21 +698,25 @@
   <!-- Left: config panel -->
   <div>
 
-    <!-- Sigma Org Configuration: set once, persisted to localStorage. -->
-    <div class="panel" style="margin-bottom: 16px;">
+    <!-- Sigma Configuration: one panel for org setup + per-embed context.
+         The Client ID / Secret entered here are used both to sign the embed
+         JWT and to authenticate the Setup-tab sync operations. -->
+    <div class="panel">
       <div class="panel-header">
-        <span class="icon">⬡</span>
-        Sigma Org Configuration
+        <span class="icon">⚙</span>
+        Sigma Configuration
         <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400;">
-          set once · saved in localStorage
+          saved in localStorage
         </span>
       </div>
       <div class="panel-body">
 
         <div class="warning-box">
-          <strong>Dev/demo only.</strong> Admin client credentials in the browser
-          mean anyone with access to this page can call Sigma admin APIs. For
-          production, move these to server-side env and remove the form.
+          <strong>Dev/demo only.</strong> The Client ID and Secret entered
+          below are used for <em>both</em> the JWT signing in the embed URL
+          <em>and</em> the Sigma admin API calls in the Setup-tab sync
+          operations. In production, move both credentials server-side and
+          remove the form fields.
         </div>
 
         <div class="form-group">
@@ -721,13 +725,13 @@
         </div>
 
         <div class="form-group">
-          <label>Admin Client ID</label>
-          <input type="text" id="adminClientId" placeholder="for sync/template operations" autocomplete="off" />
+          <label>Client ID</label>
+          <input type="text" id="clientId" placeholder="your-client-id" autocomplete="off" />
         </div>
 
         <div class="form-group">
-          <label>Admin Client Secret</label>
-          <input type="password" id="adminClientSecret" placeholder="separate from the embed signing secret" autocomplete="off" />
+          <label>Client Secret</label>
+          <input type="password" id="secret" placeholder="your-client-secret" autocomplete="off" />
         </div>
 
         <div class="form-group">
@@ -738,31 +742,6 @@
         <div class="form-group">
           <label>Canonical Workbook URL</label>
           <input type="text" id="canonicalWorkbookUrl" placeholder="https://&lt;org&gt;.sigmacomputing.io/&lt;slug&gt;/workbook/&lt;name&gt;-&lt;id&gt;" autocomplete="off" />
-        </div>
-
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <span class="icon">⚙</span>
-        Embed Configuration
-      </div>
-      <div class="panel-body">
-
-        <div class="warning-box">
-          <strong>Dev/demo only.</strong> Credentials are sent to the local server to sign the JWT.
-          In production, store credentials server-side and never expose the embed secret to the browser.
-        </div>
-
-        <div class="form-group">
-          <label>Embed Client ID</label>
-          <input type="text" id="clientId" placeholder="your-client-id" autocomplete="off" />
-        </div>
-
-        <div class="form-group">
-          <label>Embed Secret</label>
-          <input type="password" id="secret" placeholder="your-embed-secret" autocomplete="off" />
         </div>
 
         <div class="form-group">
@@ -1054,22 +1033,23 @@
 
     <h2>Why server-side signing?</h2>
     <p>
-      The JWT is signed with your embed secret. That secret must never reach
-      the browser, so <code>/api/embed-url</code> is the only place it lives
-      in memory. The frontend only ever sees the final signed URL. The same
-      principle applies to the <strong>admin</strong> OAuth credentials that
-      drive the Setup-tab sync buttons — they're signed against
-      <code>POST /v2/auth/token</code> on the server, not the browser.
+      The JWT is signed with your client secret. That secret must never
+      reach the browser, so <code>/api/embed-url</code> is the only place
+      it lives in memory. The frontend only ever sees the final signed
+      URL. The same secret is also used for OAuth
+      <code>client_credentials</code> against <code>POST /v2/auth/token</code>
+      to drive the Setup-tab sync buttons — both purposes share one
+      credential pair in this POC.
     </p>
     <div class="callout callout-warn">
       <strong>Demo caveat:</strong> this POC collects every credential and
-      Sigma org config value via on-page form fields so you can try it
-      against any Sigma org without re-deploying. The form values persist
-      in <code>localStorage</code> (with the two secret fields intentionally
-      <em>not</em> persisted). In production, move the embed and admin
-      credentials into server-side environment variables and remove those
-      form fields. The canonical workbook ID / URL can stay in the form or
-      move to env — they aren't sensitive.
+      Sigma config value via on-page form fields so you can try it against
+      any Sigma org without re-deploying. The form values persist in
+      <code>localStorage</code> (with the secret field intentionally
+      <em>not</em> persisted). In production, move the credentials into
+      server-side environment variables and remove the form fields. The
+      canonical workbook ID / URL can stay in the form or move to env —
+      they aren't sensitive.
     </div>
 
     <h2>Customers and tags in this demo</h2>
@@ -1125,64 +1105,51 @@
   <div class="doc-page">
     <h1>Setup</h1>
     <p class="lede">
-      Two pieces of Sigma plumbing power this app: a JWT-signing
-      <strong>embed credential</strong> for the iframe URL, and an
-      <strong>admin OAuth credential</strong> for the sync operations that
-      push specs and apply version tags. You'll also need to pick an embed
-      user, whitelist the app's origin in Sigma, and create a canonical
-      workbook to target. All of this gets entered into the two on-page
-      forms in the Embed tab — nothing is read from a server-side
-      <code>.env</code> file.
+      One Sigma <strong>client credential</strong> powers this app — it both
+      signs the embed JWT and authenticates the sync operations that push
+      specs and apply version tags. You'll also need to pick an embed user,
+      whitelist the app's origin in Sigma, and create a canonical workbook
+      to target. All of this gets entered into the on-page form in the
+      Embed tab — nothing is read from a server-side <code>.env</code>
+      file.
     </p>
 
     <div class="setup-step">
-      <h2><span class="step-num">1</span>Generate embed client credentials</h2>
+      <h2><span class="step-num">1</span>Generate Sigma client credentials</h2>
       <p>
         In Sigma, navigate to
         <span class="path-trail">Administration → Developer Access</span>
         (depending on your account it may be labelled <em>Embedding</em>).
       </p>
       <p>
-        Click <strong>Create New</strong>, choose <strong>Embed</strong> as the
-        credential type, and give it a name. Sigma will generate two values:
+        Click <strong>Create New</strong> and pick a credential type that
+        covers both purposes — JWT signing for the embed iframe <em>and</em>
+        OAuth <code>client_credentials</code> for the Sigma REST API. Many
+        Sigma orgs allow a single Embed credential to do both. If yours
+        requires separate Embed and REST API credentials, create the one
+        that has the broader scope (typically the REST API credential)
+        and use it everywhere in this app. Sigma will give you:
       </p>
       <ul>
-        <li><strong>Client ID</strong> — a UUID-shaped string. Goes in the <em>Embed Client ID</em> form field in the Embed tab.</li>
-        <li><strong>Secret</strong> — a long random string. Goes in the <em>Embed Secret</em> field. Sigma only shows this <strong>once</strong> — copy it now.</li>
+        <li><strong>Client ID</strong> — a UUID-shaped string. Goes in the <em>Client ID</em> field in the Embed tab.</li>
+        <li><strong>Secret</strong> — a long random string. Goes in the <em>Client Secret</em> field. Sigma only shows this <strong>once</strong> — copy it now.</li>
       </ul>
       <div class="callout">
         <strong>Docs:</strong> Sigma's
         <a href="https://help.sigmacomputing.com/sigma-computing/docs/generate-embed-client-credentials" target="_blank" rel="noopener" style="color:var(--sigma-purple);">Generate embed client credentials</a>
         guide has the canonical walkthrough with screenshots.
       </div>
-    </div>
-
-    <div class="setup-step">
-      <h2><span class="step-num">2</span>Generate admin OAuth credentials</h2>
-      <p>
-        This is a <strong>separate</strong> credential from step 1. The embed
-        credential signs the JWT in the iframe URL; the admin credential
-        authenticates the sync operations that push specs and apply version
-        tags via <code>POST /v2/auth/token</code>.
-      </p>
-      <p>
-        In the same Developer Access screen, click <strong>Create New</strong>
-        again and choose <strong>REST API</strong> (sometimes labelled
-        <em>API token</em>) as the credential type. You'll get a Client ID
-        and a Secret again — these go in the <em>Admin Client ID</em> and
-        <em>Admin Client Secret</em> fields of the Sigma Org Configuration
-        panel.
-      </p>
-      <div class="callout callout-warn">
-        <strong>Scope it down if you can.</strong> The admin credential needs
-        permission to push workbook specs (<code>PUT /v2/workbooks/&#123;id&#125;/spec</code>)
-        and apply tags (<code>POST /v2/workbooks/tag</code>) on the canonical
-        workbook only. Don't use an org-wide admin token in production.
+      <div class="callout callout-warn" style="margin-top:8px;">
+        <strong>Scope it down if you can.</strong> The credential needs to
+        sign JWTs <em>and</em> to push specs / apply tags on the canonical
+        workbook (<code>PUT /v2/workbooks/&#123;id&#125;/spec</code>,
+        <code>POST /v2/workbooks/tag</code>). Don't use an org-wide admin
+        token in production.
       </div>
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">3</span>Pick an embed user</h2>
+      <h2><span class="step-num">2</span>Pick an embed user</h2>
       <p>
         The JWT's <code>sub</code> claim identifies the user the embed session
         runs as. Two options:
@@ -1202,7 +1169,7 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">4</span>Whitelist the app's origin</h2>
+      <h2><span class="step-num">3</span>Whitelist the app's origin</h2>
       <p>
         Sigma refuses to render the iframe unless the parent page's origin is
         on the embed allow-list. In Sigma admin, find
@@ -1221,7 +1188,7 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">5</span>Create the canonical workbook and fill in Sigma Org Configuration</h2>
+      <h2><span class="step-num">4</span>Create the canonical workbook and fill in Sigma Configuration</h2>
       <p>
         Create <strong>one</strong> workbook in Sigma that will become the
         target of every version tag. Make sure it has the same structure
@@ -1234,18 +1201,18 @@
       </p>
       <p>
         Copy the workbook URL and ID into the
-        <strong>Sigma Org Configuration</strong> panel in the Embed tab:
+        <strong>Sigma Configuration</strong> panel in the Embed tab:
       </p>
       <ul>
         <li><strong>API Base</strong> — your Sigma host's API base, e.g. <code>https://aws-api.sigmacomputing.com</code>.</li>
-        <li><strong>Admin Client ID</strong> / <strong>Admin Client Secret</strong> — from step 2.</li>
+        <li><strong>Client ID</strong> / <strong>Client Secret</strong> — from step 1.</li>
         <li><strong>Canonical Workbook ID</strong> — the UUID. Get it from <code>GET /v2/workbooks</code> or from the workbook URL.</li>
         <li><strong>Canonical Workbook URL</strong> — the full browser URL, e.g. <code>https://&lt;org&gt;.sigmacomputing.io/&lt;slug&gt;/workbook/Embed-&lt;id&gt;</code>.</li>
       </ul>
       <p>
-        These five values are saved to <code>localStorage</code> so you don't
-        retype them every refresh. The two secret fields (embed secret + admin
-        client secret) are intentionally <strong>not</strong> persisted.
+        These values are saved to <code>localStorage</code> so you don't
+        retype them every refresh. The secret field is intentionally
+        <strong>not</strong> persisted.
       </p>
       <p>
         To customize what each customer sees, edit
@@ -1259,10 +1226,10 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">6</span>Sync customer version tags</h2>
+      <h2><span class="step-num">5</span>Sync customer version tags</h2>
       <p>
-        With the canonical workbook in place and Sigma Org Configuration
-        filled in, the buttons below drive the entire reconciliation —
+        With the canonical workbook in place and Sigma Configuration filled
+        in, the buttons below drive the entire reconciliation —
         spec push + tag application — without anyone having to click around
         in the Sigma UI. See <code>docs/prd.md</code> for the full
         architectural design.
@@ -1322,7 +1289,7 @@
     </div>
 
     <div class="setup-step">
-      <h2><span class="step-num">7</span>Run it</h2>
+      <h2><span class="step-num">6</span>Run it</h2>
       <p>From the project root:</p>
       <p>
         <code>npm install</code><br/>
@@ -1330,10 +1297,9 @@
         <code>npm start</code>
       </p>
       <p>
-        Open <code>http://localhost:3000</code>. Fill in <strong>Sigma Org
-        Configuration</strong> and <strong>Embed Configuration</strong>, pick
-        a customer (Customer A, Customer B, or Template), and click
-        <strong>Generate Embed</strong>.
+        Open <code>http://localhost:3000</code>. Fill in
+        <strong>Sigma Configuration</strong>, pick a customer (Customer A,
+        Customer B, or Template), and click <strong>Generate Embed</strong>.
       </p>
       <p>
         Equivalent CLI invocations for the sync operations (CI-friendly,
@@ -1345,13 +1311,13 @@
         <li><code>node scripts/sync-customer-tags.js --customer "Customer A" --dry-run</code> — single-customer dry run.</li>
       </ul>
       <div class="callout">
-        <strong>For production:</strong> move <code>SIGMA_CLIENT_ID</code> /
-        <code>SIGMA_SECRET</code> (embed signing) and the admin OAuth
-        credentials into server-side environment variables, and remove the
-        secret form fields. The canonical workbook ID and URL can stay in
-        the form (they aren't sensitive) or move to env. Either way, the
-        signing endpoint and the sync handlers should be the only places
-        the secrets ever appear.
+        <strong>For production:</strong> move <code>SIGMA_CLIENT_ID</code>
+        and <code>SIGMA_CLIENT_SECRET</code> into server-side environment
+        variables, and remove the form's Client ID / Client Secret fields.
+        The canonical workbook ID and URL can stay in the form (they
+        aren't sensitive) or move to env. Either way, the signing endpoint
+        and the sync handlers should be the only places the secret ever
+        appears.
       </div>
     </div>
   </div>
@@ -1437,20 +1403,31 @@
   // Form state, localStorage persistence, and validation
   // ---------------------------------------------------------------------------
 
-  // Fields under "Sigma Org Configuration" — saved to localStorage so users
-  // don't have to retype them every refresh. The server no longer reads any
-  // of this from process.env; everything comes from the browser per request.
+  // Fields in the consolidated Sigma Configuration panel — saved to
+  // localStorage so users don't have to retype them every refresh. The
+  // server reads none of this from process.env; everything comes from the
+  // browser per request. Secrets are intentionally NOT persisted.
   const PERSISTED_FIELDS = [
-    'apiBase', 'adminClientId', 'adminClientSecret',
+    'apiBase',
+    'clientId',
     'canonicalWorkbookId', 'canonicalWorkbookUrl',
-    'clientId', 'email', 'accountType', 'teams',
-    // Note: embed secret + admin secret intentionally NOT persisted by default.
+    'email', 'accountType', 'teams',
   ];
   const LS_KEY = 'sigma-embed-poc:v1';
 
   function loadPersisted() {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch {}
+    // Migrate older shape: the previous version had a separate "Admin Client
+    // ID" field stored as adminClientId. After the consolidation, both
+    // purposes share the single `clientId` field, so prefer whichever is
+    // non-empty and clean up the orphan keys.
+    if (!saved.clientId && saved.adminClientId) saved.clientId = saved.adminClientId;
+    if ('adminClientId' in saved || 'adminClientSecret' in saved) {
+      delete saved.adminClientId;
+      delete saved.adminClientSecret;
+      localStorage.setItem(LS_KEY, JSON.stringify(saved));
+    }
     for (const f of PERSISTED_FIELDS) {
       const el = document.getElementById(f);
       if (el && saved[f] != null) el.value = saved[f];
@@ -1651,26 +1628,26 @@
   function readAdminConfig() {
     return {
       apiBase:              document.getElementById('apiBase').value.trim(),
-      adminClientId:        document.getElementById('adminClientId').value.trim(),
-      adminClientSecret:    document.getElementById('adminClientSecret').value.trim(),
+      clientId:             document.getElementById('clientId').value.trim(),
+      secret:               document.getElementById('secret').value.trim(),
       canonicalWorkbookId:  document.getElementById('canonicalWorkbookId').value.trim(),
       canonicalWorkbookUrl: document.getElementById('canonicalWorkbookUrl').value.trim(),
     };
   }
 
-  // The banner is purely client-side: if admin creds + canonical workbook id
+  // The banner is purely client-side: if client creds + canonical workbook id
   // are filled in, the buttons will run in live mode. Otherwise dry-run.
   function updateAdminBanner() {
     if (!adminBanner) return;
     const cfg = readAdminConfig();
-    const live = cfg.adminClientId && cfg.adminClientSecret && cfg.canonicalWorkbookId;
+    const live = cfg.clientId && cfg.secret && cfg.canonicalWorkbookId;
     if (live) {
       adminBanner.classList.add('live');
       adminBanner.innerHTML = 'Live mode — operations will hit the configured Sigma org.';
     } else {
       adminBanner.classList.remove('live');
       adminBanner.innerHTML =
-        'Dry-run mode — fill in <strong>Admin Client ID</strong>, <strong>Admin Client Secret</strong>, and <strong>Canonical Workbook ID</strong> above to enable live mode.';
+        'Dry-run mode — fill in <strong>Client ID</strong>, <strong>Client Secret</strong>, and <strong>Canonical Workbook ID</strong> in the Embed tab to enable live mode.';
     }
   }
 

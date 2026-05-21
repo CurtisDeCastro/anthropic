@@ -9,7 +9,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  const { apiBase, adminClientId, adminClientSecret, canonicalWorkbookId } = body;
+  const { apiBase, clientId, secret, canonicalWorkbookId } = body;
   const events = [];
   if (!canonicalWorkbookId) {
     return {
@@ -22,8 +22,8 @@ exports.handler = async (event) => {
   try {
     const client = await makeClient({
       apiBase,
-      clientId: adminClientId,
-      clientSecret: adminClientSecret,
+      clientId,
+      clientSecret: secret,
       onEvent: (e) => events.push(e),
     });
     const result = await syncAllCustomers(client, canonicalWorkbookId);

@@ -17,12 +17,13 @@ app.get('/api/customers', (_req, res) => {
 });
 
 // Tag-sync operations take all Sigma config from the request body. The
-// in-app "Sigma Org Configuration" form is the source of truth; the server
-// itself holds nothing per-org.
+// in-app Sigma Configuration form is the source of truth; the server itself
+// holds nothing per-org. The clientId/secret used here are the same pair
+// that signs the embed JWT — the consolidated UI sends one credential.
 async function runTagSync(req, res, op) {
   const events = [];
   const {
-    apiBase, adminClientId, adminClientSecret, canonicalWorkbookId,
+    apiBase, clientId, secret, canonicalWorkbookId,
   } = req.body || {};
 
   if (!canonicalWorkbookId) {
@@ -32,8 +33,8 @@ async function runTagSync(req, res, op) {
   try {
     const client = await makeClient({
       apiBase,
-      clientId: adminClientId,
-      clientSecret: adminClientSecret,
+      clientId,
+      clientSecret: secret,
       onEvent: (e) => events.push(e),
     });
     const result = await op(client, canonicalWorkbookId);
