@@ -1,0 +1,44 @@
+# CI for the Sigma embed POC.
+#
+# Two jobs, both PR-gated:
+#   - test:     runs the Node built-in test runner against lib/.
+#   - validate: runs the sync script in --dry-run mode. Confirms
+#               CUSTOMER_CONFIG composes into valid specs without making any
+#               Sigma API calls (no admin creds needed in CI).
+#
+# To wire live-mode validation: add SIGMA_CLIENT_ID and SIGMA_CLIENT_SECRET
+# to repo secrets and replace --dry-run below. Not recommended for PRs from
+# forks (secrets aren't exposed to forked PRs by default — by design).
+name: CI
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  validate:
+    name: Tag-sync dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Validate CUSTOMER_CONFIG composes cleanly
+        run: node scripts/sync-customer-tags.js --mode template --dry-run

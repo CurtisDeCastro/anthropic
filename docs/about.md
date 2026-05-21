@@ -1,15 +1,15 @@
 # About this app
 
-> **Status:** Proof of concept. Claims marked 🔮 describe the intended production architecture, not what is currently implemented.
+> **Status:** Working proof of concept, wired against a live Sigma org. See [`docs/prd.md`](./prd.md) for the production-architecture design this app implements.
 
-This app is a proof of concept for embedding customer-specific Sigma workbooks using JWT-signed URLs. The goal is to demonstrate a practical pattern for serving different customers through a shared application shell, while still letting each customer see a workbook that reflects their own schema.
+This app is a proof of concept for embedding customer-specific Sigma workbooks using JWT-signed URLs. It demonstrates a practical pattern for serving different customers through a shared application shell, where each customer sees a workbook with their own custom columns — backed by a **single canonical workbook with per-customer version tags**, not N separate documents.
 
-Today, the demo uses a small static customer map in `lib/embed.js`. Conceptually, though, the important pattern is that workbook configuration is assembled at request time from two layers:
+The demo keeps a small customer map in `lib/embed.js`. Workbook configuration is assembled at request time from two layers:
 
-- a shared base definition that applies to every customer, and
-- a customer-specific overlay that defines which additional columns should be exposed.
+- a shared **base definition** that applies to every customer (`BASE_COLUMNS`), and
+- a **customer-specific overlay** that defines which additional columns to expose (`CUSTOMER_CONFIG[customer].extraColumns`).
 
-That seam is the real point of the POC. The static map can later be replaced by a database-backed mapping table without changing the rest of the request pipeline.
+That seam is the real point of the POC. The static map can be replaced by a database-backed mapping table without changing the rest of the request pipeline. The composition function (`buildSpec()`) is the only place this logic lives.
 
 ---
 
@@ -19,25 +19,25 @@ This demo proves that the application can:
 
 - accept a customer selection in the browser,
 - look up customer-specific workbook configuration on the server,
-- compose a customer-specific workbook definition,
-- sign a secure Sigma embed URL using a server-held secret, and
+- **programmatically compose and push** a customer-specific workbook definition to Sigma via `PUT /v2/workbooks/{id}/spec`,
+- create and apply Sigma **version tags** so each customer's view is an immutable snapshot under one canonical workbook,
+- sign a secure JWT embed URL pointing at the customer's tagged version, and
 - reload the embed so the customer sees a workbook with the right custom column.
 
-In other words, it shows that customer-driven workbook variation can be handled at request time — from a single application — instead of maintaining entirely separate embed applications per customer.
+In other words, it shows that customer-driven workbook variation can be handled programmatically — from a single application, against a single canonical workbook — instead of maintaining entirely separate embed applications or workbooks per customer.
 
 ---
 
 ## What this POC does not prove yet
 
-This is still a demo, not a production-ready reference implementation. It does not yet prove:
+This is a working demo against a real Sigma org, not a production-ready reference implementation. It does not yet prove:
 
 - performance at production scale,
-- operational behavior across many customers,
-- automated lifecycle management for workbook specs,
+- operational behavior across many customers (the live verification used two),
 - schema drift handling over time,
-- observability and alerting,
+- observability and alerting beyond the structured operation log,
 - cache or rate-limit behavior under load,
-- rollout/versioning strategy for spec changes, or
+- rollout / version-pinning strategy for spec changes, or
 - security hardening beyond the basic JWT pattern.
 
 Those items are the main areas that would need to be filled in before using this pattern as a production architecture.
@@ -101,17 +101,15 @@ The important design choice is that the customer-specific logic is metadata-driv
 
 ### 3. Server-side spec composition
 
-The server merges the shared base with the customer overlay at request time using `buildSpec(customer)`.
+The server merges the shared base with the customer overlay using `buildSpec(customer)` (used by the sync script) and produces an embed URL pointing at the customer's tag using `handleEmbedRequest` (used by `/api/embed-url` at request time).
 
-That function is the architectural seam of the whole demo. It is the place where the system decides which workbook definition to generate for a given customer.
+`buildSpec()` is the architectural seam of the whole design — it's the place where the system decides which workbook definition to generate for a given customer. Today that logic is simple and static. In production, the same function would read from a mapping table keyed on customer ID.
 
-Today that logic is simple and static. In production, the same function would read from a mapping table keyed on customer ID.
-
-> 🔮 **Note on spec push:** the composed spec is currently returned in the API response and rendered in the UI for illustrative purposes, but is **not pushed to Sigma** at request time. The embed loads one of two pre-built workbooks. The intended production path — programmatically applying the composed spec to a workbook — requires either a customer provisioning step at onboarding time or a different architectural approach; see the [PRD](#) for the proposed production path.
+**Spec push is real.** The reconciliation script (`scripts/sync-customer-tags.js`, also wired to two buttons in the Setup tab) pushes the composed spec to `PUT /v2/workbooks/{id}/spec` and applies the customer's version tag via `POST /v2/workbooks/tag`. The previously-illustrative `buildSpec()` output is now the input the sync uses.
 
 ### 4. JWT embed delivery
 
-After the spec is chosen, the server signs a JWT with the Sigma embed secret and returns a secure embed URL to the browser.
+At embed time, `handleEmbedRequest` looks up the customer's tag name, appends `/tag/<tagName>` to the canonical workbook URL, signs a JWT with the embed secret, and returns the URL. No Sigma API calls happen in this hot path — the spec push and tag application were done offline by the sync script.
 
 This keeps secret material off the client and follows the correct trust boundary for secure Sigma embedding.
 
@@ -119,29 +117,30 @@ This keeps secret material off the client and follows the correct trust boundary
 
 ## Spec composition
 
-The demo currently stores customer configuration in a static `CUSTOMER_CONFIG` object inside `lib/embed.js`.
+The demo keeps customer configuration in a static `CUSTOMER_CONFIG` object inside `lib/embed.js`. Each entry contains:
 
-That object contains three kinds of information:
+- `tagName` — the Sigma version tag this customer's embed targets (e.g. `customer-customer-a`)
+- `extraColumns` — the customer-specific column formulas that get added on top of `BASE_COLUMNS`
 
-- customer identity,
-- workbook destination metadata (the pre-built workbook URL), and
-- custom column overrides.
+The two flows are:
 
-The flow is:
+**Sync (offline, via the script or the Setup-tab buttons):**
 
 1. Start with `BASE_COLUMNS`
 2. Look up the selected customer in `CUSTOMER_CONFIG`
-3. Append customer-specific column definitions
-4. Associate the resulting spec with the correct workbook URL
-5. Sign and return the embed URL
+3. Append `extraColumns` to produce the per-customer spec
+4. `POST /v2/tags` to ensure the version tag exists (idempotent)
+5. `PUT /v2/workbooks/{CANONICAL.workbookId}/spec` with the composed spec
+6. `POST /v2/workbooks/tag` to apply `tagName` to the new published version
 
-This is intentionally simple so the demo is easy to understand. The intended production path is:
+**Embed (online, at request time):**
 
-```
-customer ID → mapping table → customer column overrides + workbook URL → composed spec → signed embed URL
-```
+1. Look up `tagName` in `CUSTOMER_CONFIG`
+2. Construct `${CANONICAL.workbookUrl}/tag/${tagName}`
+3. Sign a JWT and append `?:jwt=<token>&:embed=true`
+4. Return the URL — done in one HMAC sign, no Sigma API calls
 
-That is the cleanest way to keep the application logic stable while scaling to more customers.
+The intended production path replaces step 2 of the sync flow with a database-backed mapping table lookup; nothing else changes.
 
 ---
 
@@ -207,21 +206,17 @@ Customer metadata is hard-coded in `lib/embed.js`. This is fine for a demo, but 
 
 When the selected customer changes, the iframe is rebuilt and the workbook reloads. That is acceptable for a POC, but the UX cost should be measured before adopting it broadly.
 
-### Spec composition is illustrative, not live
-
-The spec viewer in the UI shows the composed spec in real time, and the server builds and returns it on every request. However, that spec is not currently pushed to Sigma — it selects between two pre-built workbooks. The live push behavior is the intended next implementation step.
-
 ### Minimal error handling
 
-The demo focuses on the happy path. Extend it to handle: unknown customer IDs, missing workbook mappings, JWT signing failures, Sigma API failures, and iframe load failures.
+The demo focuses on the happy path. Extend it to handle: unknown customer IDs, missing workbook mappings, JWT signing failures, Sigma API failures, and iframe load failures. The sync script does already handle per-customer failures gracefully (one customer's failure doesn't block the rest) and exits with a non-zero status — see `scripts/sync-customer-tags.js`.
 
-### No observability layer
+### Limited observability
 
-There is currently no structured logging, tracing, or metrics.
+The sync script emits structured JSON log events; the Setup-tab log panel renders them. There's no metrics emission, no tracing, and no alerting wiring. For production, route those events into a logger (`pino`, structured stdout to your log aggregator, etc.) and add timing on the spec push + tag steps.
 
-### No spec versioning
+### No spec versioning beyond Sigma's
 
-No formal versioning exists yet for the base spec, customer overlays, or generated outputs.
+Sigma's own version-tag system is the source of truth for "what each customer was seeing as of when." There's no application-side versioning on top of `CUSTOMER_CONFIG` itself — git history is the only record. For controlled rollouts, consider adding a `specVersion` field per customer and gating tag updates on it.
 
 ---
 
@@ -229,21 +224,24 @@ No formal versioning exists yet for the base spec, customer overlays, or generat
 
 | File | Role |
 |---|---|
-| `lib/embed.js` | Source of truth for `CUSTOMER_CONFIG`, `BASE_COLUMNS`, `buildSpec()`, `generateEmbedUrl()`, and `handleEmbedRequest()`. This is the composition layer. |
-| `server.js` | Thin Express wrapper for local development. Imports from `lib/embed.js`. |
-| `netlify/functions/embed-url.js` | Production serverless handler. Imports from `lib/embed.js`. |
+| `lib/embed.js` | Source of truth for `CUSTOMER_CONFIG`, `BASE_COLUMNS`, `CANONICAL`, `buildSpec()`, `buildTemplateSpec()`, `slugify()`, `tagNameFor()`, `generateEmbedUrl()`, and `handleEmbedRequest()`. Module-load slug-collision guard runs here. |
+| `lib/tag-sync.js` | Sigma REST client + reconciliation logic. `makeClient`, `ensureTagExists`, `pushWorkbookSpec`, `tagWorkbookVersion`, `syncCustomer`, `syncAllCustomers`, `pushTemplate`, `propagateTemplate`. Used by the CLI and the two button-backing routes. |
+| `scripts/sync-customer-tags.js` | Copy-able CLI. `--mode customers\|template`, `--customer <id>`, `--dry-run`. Auto dry-runs when admin credentials are absent. |
+| `test/embed.test.js` | Node built-in test runner. Smoke tests on slugify, build*, stripSpecForPush, tag-name resolution, and the collision guard. Run with `npm test`. |
+| `server.js` | Express dev server: `/api/embed-url`, `/api/sync-tags`, `/api/propagate-template`, `/api/sync-status`. |
+| `netlify/functions/*.js` | Matching Netlify Functions for production deploy. |
 | `netlify.toml` | Netlify deploy config. Publishes `public/`, routes `/api/*` to functions. |
-| `public/index.html` | Single-page frontend: credential form, customer selector, live spec preview, Sigma iframe. |
-| `package.json` | Runtime dependencies: `express`, `jsonwebtoken`, `uuid`. |
+| `public/index.html` | Single-page frontend: credential form, customer selector, live spec preview, Sigma iframe, Setup-tab admin actions. |
+| `package.json` | npm scripts (`start`, `dev`, `sync-tags`, `propagate-template`, `test`). Deps: `express`, `jsonwebtoken`, `uuid`. |
 
 ---
 
 ## Handoff notes
 
-If you are picking up this project for the first time, start by understanding these three things in order:
+If you are picking up this project for the first time, start with these three things in order:
 
-1. How `buildSpec(customer)` in `lib/embed.js` assembles the runtime workbook definition.
-2. How `/api/embed-url` signs and returns the final embed URL.
-3. Which parts of the current implementation are demo scaffolding (the credential form, the static `CUSTOMER_CONFIG`) versus intended production pattern (the `buildSpec` seam, the composition layer).
+1. **`lib/embed.js`** — how `buildSpec(customer)` assembles the workbook definition, and how `handleEmbedRequest` constructs the `/tag/<tagName>` embed URL.
+2. **`lib/tag-sync.js`** — how the reconciliation script turns `CUSTOMER_CONFIG` into Sigma API calls (spec push → tag).
+3. **`docs/prd.md`** — the production-architecture design and the rollout milestones.
 
 The key insight is that the demo is less about the specific two customers shown on screen, and more about the composition boundary between a shared workbook base and customer-specific metadata. That boundary is what makes the pattern scalable.

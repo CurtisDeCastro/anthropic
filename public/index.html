@@ -1206,9 +1206,9 @@
     'Customer B': [{ id: 'syaasfXKHZ', formula: 'Text([Cust Json].LOYALTY_EXTRA.BIRTHDAY)', name: 'Birthday' }],
   };
 
-  const CUSTOMER_WORKBOOK_URLS = {
-    'Customer A': 'https://staging.sigmacomputing.io/test-drive-staging-oai-demo/workbook/Customer-A-2D2ps4NFZpYHNHO7PGw1OY',
-    'Customer B': 'https://staging.sigmacomputing.io/test-drive-staging-oai-demo/workbook/Customer-B-52yQjgbpjd4i6fN9s9xF7X',
+  const CUSTOMER_TAG_NAMES = {
+    'Customer A': 'customer-customer-a',
+    'Customer B': 'customer-customer-b',
   };
 
   function renderSpec(customer) {
@@ -1236,25 +1236,25 @@
 
     viewer.innerHTML = `
       <div class="spec-tree">
-        <div class="spec-section-label">Workbook URL</div>
+        <div class="spec-section-label">Embed target (canonical workbook + tag)</div>
         <div style="font-size:11px;color:var(--text);word-break:break-all;margin-bottom:4px;">
-          ${CUSTOMER_WORKBOOK_URLS[customer]}
+          &lt;canonical-workbook-url&gt;<strong style="color:var(--sigma-purple);">/tag/${CUSTOMER_TAG_NAMES[customer]}</strong>
         </div>
 
         <div class="spec-section-label">
-          Table element — columns
+          Table element — columns pushed to this tag
           <span style="font-weight:400;color:var(--text-muted);font-size:10px;margin-left:6px;">
             (${BASE_COLUMNS_PREVIEW.length} base + ${extra.length} customer-specific)
           </span>
         </div>
         ${colsHtml}
 
-        <div class="spec-section-label" style="margin-top:16px;">Production wiring note</div>
+        <div class="spec-section-label" style="margin-top:16px;">How this gets applied</div>
         <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">
-          In production, <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">extraColumns</code>
-          would be fetched from a mapping table keyed on customer ID.
-          The <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">buildSpec()</code>
-          function on the server is the only change point.
+          <strong>Sync customer tags from config</strong> in the Setup tab pushes this exact
+          spec to the canonical workbook and applies the
+          <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">${CUSTOMER_TAG_NAMES[customer]}</code>
+          tag. The embed endpoint then signs an embed URL pointing at that tagged version.
         </div>
       </div>`;
   }
