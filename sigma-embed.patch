@@ -1,0 +1,919 @@
+From a679ed9bdcb0bc5313267c7525e3e38d5668d2bc Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 28 May 2026 21:26:37 +0000
+Subject: [PATCH] feat: add sigma-embed skill (v0.2.0)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds a new sigma-embed skill covering server-side JWT embed URL
+generation, per-customer workbook variants via version tags, and
+automated tag provisioning.
+
+- skills/sigma-embed/SKILL.md — credential setup, JWT signing,
+  tagged URL construction, reference index, security notes
+- skills/sigma-embed/scripts/generate-embed-url.js — standalone
+  Node.js 18+ helper (node:crypto only, no npm deps)
+- skills/sigma-embed/reference/customer-config.md — CUSTOMER_CONFIG
+  pattern, buildSpec/buildTemplateSpec, slugify, embed route wiring
+- skills/sigma-embed/reference/tag-sync.md — makeClient/auto dry-run,
+  pushWorkbookSpec, tagWorkbookVersion, syncAllCustomers,
+  propagateTemplate, Express routes, CLI entry point
+- skills/sigma-embed/reference/escalation.md — signals to escalate to
+  data model tags, progression guide, rule of thumb
+- .cortex/skills/sigma-embed/SKILL.md — Cortex Code mirror
+- AGENTS.md, README.md updated with sigma-embed entry
+- CHANGELOG.md updated for v0.2.0
+- All four plugin manifests bumped to v0.2.0
+---
+ .claude-plugin/marketplace.json               |   4 +-
+ .claude-plugin/plugin.json                    |   2 +-
+ .cortex-plugin/plugin.json                    |   2 +-
+ .cortex/skills/sigma-embed/SKILL.md           | 149 +++++++++++++
+ .cursor-plugin/plugin.json                    |   2 +-
+ AGENTS.md                                     |   1 +
+ CHANGELOG.md                                  |   8 +
+ README.md                                     |   1 +
+ skills/sigma-embed/SKILL.md                   | 149 +++++++++++++
+ .../sigma-embed/reference/customer-config.md  | 124 +++++++++++
+ skills/sigma-embed/reference/escalation.md    |  53 +++++
+ skills/sigma-embed/reference/tag-sync.md      | 199 ++++++++++++++++++
+ .../sigma-embed/scripts/generate-embed-url.js |  57 +++++
+ 13 files changed, 746 insertions(+), 5 deletions(-)
+ create mode 100644 .cortex/skills/sigma-embed/SKILL.md
+ create mode 100644 skills/sigma-embed/SKILL.md
+ create mode 100644 skills/sigma-embed/reference/customer-config.md
+ create mode 100644 skills/sigma-embed/reference/escalation.md
+ create mode 100644 skills/sigma-embed/reference/tag-sync.md
+ create mode 100755 skills/sigma-embed/scripts/generate-embed-url.js
+
+diff --git a/.claude-plugin/marketplace.json b/.claude-plugin/marketplace.json
+index 678a2d2..2d05661 100644
+--- a/.claude-plugin/marketplace.json
++++ b/.claude-plugin/marketplace.json
+@@ -5,7 +5,7 @@
+   },
+   "metadata": {
+     "description": "Sigma Computing agent skills for Claude Code, Cursor, OpenAI Codex, and Snowflake Cortex Code. Build, analyze, and administer Sigma resources programmatically.",
+-    "version": "0.1.3"
++    "version": "0.2.0"
+   },
+   "plugins": [
+     {
+@@ -15,7 +15,7 @@
+         "url": "https://github.com/sigmacomputing/sigma-agent-skills.git"
+       },
+       "description": "Sigma Computing agent skills for Claude Code, Cursor, OpenAI Codex, and Snowflake Cortex Code. Build, analyze, and administer Sigma resources programmatically.",
+-      "version": "0.1.3",
++      "version": "0.2.0",
+       "author": {
+         "name": "Sigma Computing"
+       },
+diff --git a/.claude-plugin/plugin.json b/.claude-plugin/plugin.json
+index 81f5744..cd2c0fb 100644
+--- a/.claude-plugin/plugin.json
++++ b/.claude-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "sigma-computing",
+-  "version": "0.1.3",
++  "version": "0.2.0",
+   "description": "Sigma Computing agent skills for Claude Code, Cursor, OpenAI Codex, and Snowflake Cortex Code. Build, analyze, and administer Sigma resources programmatically.",
+   "author": {
+     "name": "Sigma Computing"
+diff --git a/.cortex-plugin/plugin.json b/.cortex-plugin/plugin.json
+index 2f03807..5dedab1 100644
+--- a/.cortex-plugin/plugin.json
++++ b/.cortex-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "sigma-computing",
+-  "version": "0.1.3",
++  "version": "0.2.0",
+   "description": "Sigma Computing agent skills for Claude Code, Cursor, OpenAI Codex, and Snowflake Cortex Code. Build, analyze, and administer Sigma resources programmatically.",
+   "author": {
+     "name": "Sigma Computing"
+diff --git a/.cortex/skills/sigma-embed/SKILL.md b/.cortex/skills/sigma-embed/SKILL.md
+new file mode 100644
+index 0000000..524c75e
+--- /dev/null
++++ b/.cortex/skills/sigma-embed/SKILL.md
+@@ -0,0 +1,149 @@
++---
++name: sigma-embed
++description: >-
++  Generate server-side Sigma embed URLs (JWT signing, workbook URL
++  construction) and manage per-customer workbook variants via version tags.
++  Use whenever the user wants to embed a Sigma workbook in a host application,
++  generate a signed embed URL, configure SIGMA_EMBED_CLIENT_ID /
++  SIGMA_EMBED_SECRET / SIGMA_WORKBOOK_URL, set up per-customer column
++  variants, apply workbook version tags, or automate tag provisioning via
++  the Sigma REST API. Prerequisite: obtain admin API credentials via the
++  sigma-api skill if tag provisioning is needed.
++---
++
++# Sigma Embed
++
++Generate server-side embed URLs that open a Sigma workbook inside a host application. This skill covers JWT signing, per-customer workbook variants via version tags, and automated tag provisioning.
++
++**Requirements:** Node.js 18+ (uses built-in `node:crypto` — no npm packages required). For tag provisioning via the Sigma REST API, also complete the `sigma-api` skill first to set `$SIGMA_BASE_URL` and `$SIGMA_API_TOKEN`.
++
++## Embed vs. Admin Credentials
++
++Sigma embeds use **two separate credential sets**. Never substitute one for the other.
++
++| Set | Where to find | Used for |
++|-----|--------------|----------|
++| **Embed Client ID** + **Embed Secret** | Sigma → Administration → Developer Access → Embed credentials | JWT `kid` header + HS256 signing key |
++| **Admin Client ID** + **Admin Client Secret** | Sigma → Administration → Developer Access → API credentials | REST API tag writes (see `sigma-api` skill) |
++
++```sh
++# Embed credentials — server env only, never browser-facing
++export SIGMA_EMBED_CLIENT_ID="your-embed-client-id"
++export SIGMA_EMBED_SECRET="your-embed-secret"
++export SIGMA_WORKBOOK_URL="https://app.sigmacomputing.com/embed/1-xxxx"
++```
++
++## Step 1 — Generate a Basic Embed URL
++
++The JWT `kid` header must equal the Embed Client ID. `jti` must be a fresh UUID per request. Set `exp` short — 5 minutes is standard. **Never generate embed URLs in browser code.**
++
++### Preferred: bundled helper script
++
++`scripts/generate-embed-url.js` reads the four env vars and prints a single signed URL to stdout:
++
++- **Claude Code:** `node ${CLAUDE_PLUGIN_ROOT}/skills/sigma-embed/scripts/generate-embed-url.js`
++- **Generic:** `node <repo-root>/skills/sigma-embed/scripts/generate-embed-url.js`
++
++| In (env) | Out (stdout) |
++|----------|--------------|
++| `SIGMA_EMBED_CLIENT_ID`, `SIGMA_EMBED_SECRET`, `SIGMA_WORKBOOK_URL`, `SIGMA_EMBED_EMAIL` | A single embed URL |
++
++Optional: set `SIGMA_EMBED_TAG` to target a specific tagged version (see Step 2).
++
++### Inline reference implementation (Node.js)
++
++Uses only built-in `node:crypto` — no `npm install` needed.
++
++```js
++import { createHmac, randomUUID } from 'node:crypto';
++
++function buildEmbedUrl(workbookUrl, tagName = null) {
++  const {
++    SIGMA_EMBED_CLIENT_ID: clientId,
++    SIGMA_EMBED_SECRET: secret,
++    SIGMA_EMBED_EMAIL: email,
++  } = process.env;
++
++  if (!clientId || !secret || !email) {
++    throw new Error('SIGMA_EMBED_CLIENT_ID, SIGMA_EMBED_SECRET, and SIGMA_EMBED_EMAIL must be set');
++  }
++
++  const encodeB64Url = (obj) =>
++    Buffer.from(JSON.stringify(obj)).toString('base64url');
++
++  const now = Math.floor(Date.now() / 1000);
++  const header  = { alg: 'HS256', typ: 'JWT', kid: clientId };
++  const payload = { sub: email, iat: now, exp: now + 300, jti: randomUUID() };
++
++  const unsigned = `${encodeB64Url(header)}.${encodeB64Url(payload)}`;
++  const sig = createHmac('sha256', secret).update(unsigned).digest('base64url');
++  const token = `${unsigned}.${sig}`;
++
++  const base = tagName ? `${workbookUrl}/tag/${tagName}` : workbookUrl;
++  return `${base}?:jwt=${encodeURIComponent(token)}&:embed=true`;
++}
++```
++
++Wire this into a server route (Express, Fastify, Next.js API route, etc.) — return only the signed URL to the browser, never the token components.
++
++## Step 2 — Target a Tagged Workbook Version
++
++Without a tag, embeds always show the current published state. Tags freeze a named snapshot — use them for per-customer variants, staging/production separation, and safe rollouts.
++
++Insert the tag name as a **path segment** before the query string:
++
++```
++{workbookUrl}/tag/{tagName}?:jwt=...&:embed=true
++```
++
++This is purely a URL change — the JWT signing logic is identical.
++
++```js
++// Production variant
++const url = buildEmbedUrl(process.env.SIGMA_WORKBOOK_URL, 'env-prod');
++
++// Per-customer variant
++const url = buildEmbedUrl(process.env.SIGMA_WORKBOOK_URL, `customer-${slug}`);
++```
++
++**Tag naming conventions:**
++
++| Purpose | Pattern | Example |
++|---------|---------|---------|
++| Per-customer variant | `customer-<slug>` | `customer-acme` |
++| Base template (never embedded directly) | `template` | `template` |
++| Environment separation | `env-<name>` | `env-prod` |
++
++A slug is the customer identifier lowercased, non-alphanumeric runs replaced by `-`, leading/trailing `-` stripped.
++
++## Step 3 — Per-Customer Column Variants
++
++If different customers need different columns or visible elements, maintain a `CUSTOMER_CONFIG` object in code and derive workbook specs programmatically. Push each derived spec and apply a `customer-<slug>` tag. Concurrent embed requests are safe because tags are immutable snapshots.
++
++Load `reference/customer-config.md` for the full pattern: `CUSTOMER_CONFIG` shape, `buildSpec()`, `buildTemplateSpec()`, slug derivation, and embed route integration.
++
++## Step 4 — Automate Tag Provisioning
++
++Spec pushes and tag applications are orchestrated by a shared library, not by the embed URL path. The library supports an auto dry-run mode (logs payloads, no API calls) when admin credentials are absent, so the application runs fully without live credentials.
++
++Load `reference/tag-sync.md` for the `makeClient` / `onEvent` pattern, per-customer sync, template propagation, CLI entry point, and Express/serverless wiring.
++
++## Step 5 — When to Escalate
++
++The workbook-tag approach handles most per-customer use cases. Load `reference/escalation.md` when customers need different source databases, row-level security policies differ per customer, or per-customer column names are driven by warehouse schema rather than a config object.
++
++## Verifying an Embed
++
++Open browser DevTools on the host page and confirm:
++1. The `iframe src` contains `?:jwt=` and `&:embed=true`.
++2. `SIGMA_EMBED_SECRET` does not appear in any Network request from the host page.
++3. The JWT is not stored in a JS variable accessible to the page (it should only be used as the iframe `src`).
++
++## Security Notes
++
++- Never generate embed URLs in browser JavaScript — the secret would be exposed.
++- Never log `SIGMA_EMBED_SECRET` or return it in API responses.
++- Set `exp` ≤ 10 minutes; long-lived tokens weaken replay protection.
++- Always generate a fresh `jti` UUID per request — Sigma rejects replayed tokens.
++- Admin REST credentials and embed signing credentials are distinct; never substitute one for the other.
++- Protect any route that triggers spec pushes or tag writes — these are write operations on live workbooks.
+diff --git a/.cursor-plugin/plugin.json b/.cursor-plugin/plugin.json
+index 2f03807..5dedab1 100644
+--- a/.cursor-plugin/plugin.json
++++ b/.cursor-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "sigma-computing",
+-  "version": "0.1.3",
++  "version": "0.2.0",
+   "description": "Sigma Computing agent skills for Claude Code, Cursor, OpenAI Codex, and Snowflake Cortex Code. Build, analyze, and administer Sigma resources programmatically.",
+   "author": {
+     "name": "Sigma Computing"
+diff --git a/AGENTS.md b/AGENTS.md
+index a70ce80..6422a41 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -41,5 +41,6 @@ Agents activate these automatically based on the user's request.
+ 
+ - **sigma-api** — Authenticate against the Sigma REST API (OAuth client credentials, bearer tokens, base URL per cloud). Prerequisite for the other skills.
+ - **sigma-data-models** — Create, retrieve, or modify a Sigma data model spec (sources, columns, metrics, relationships, filters, controls, folder groupings, column-level security) via the REST API.
++- **sigma-embed** — Generate server-side Sigma embed URLs (JWT signing, workbook URL construction) and manage per-customer workbook variants via version tags. Covers credential setup, tagged URL construction, per-customer spec composition, and automated tag provisioning.
+ 
+ See [`README.md`](./README.md) for full details, including team deployment.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d01bcbd..50abc68 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,14 @@
+ 
+ All notable changes to this project will be documented in this file.
+ 
++## v0.2.0 — 2026-05-28
++
++New `sigma-embed` skill for generating Sigma embed URLs and managing per-customer workbook variants via version tags.
++
++### Added
++
++- **`sigma-embed`** — Generate server-side embed URLs (JWT signing via built-in `node:crypto`, no npm deps) and manage per-customer workbook variants. Covers embed vs. admin credential separation, tagged workbook URL construction (`/tag/{name}` path segment), per-customer spec composition via a `CUSTOMER_CONFIG` pattern, automated tag provisioning with auto dry-run when credentials are absent, and escalation guidance to data model tags for more complex cases. Includes `scripts/generate-embed-url.js` for quick verification and three reference files: `reference/customer-config.md`, `reference/tag-sync.md`, and `reference/escalation.md`.
++
+ ## v0.1.3 — 2026-05-21
+ 
+ `sigma-api` base-URL allowlist resynced with the current published hosts.
+diff --git a/README.md b/README.md
+index 1312173..94d96f2 100644
+--- a/README.md
++++ b/README.md
+@@ -45,6 +45,7 @@ Agents activate these automatically based on the user's request.
+ |-------|-------------|
+ | **sigma-api** | Authenticate against the Sigma REST API (OAuth client credentials, bearer tokens, base URL per cloud). Prerequisite for the other skills. |
+ | **sigma-data-models** | Create, retrieve, or modify a Sigma data model spec (sources, columns, metrics, relationships, filters, controls, folder groupings, column-level security) via the REST API. |
++| **sigma-embed** | Generate server-side Sigma embed URLs (JWT signing, workbook URL construction) and manage per-customer workbook variants via version tags. Covers credential setup, tagged URL construction, per-customer spec composition, and automated tag provisioning. |
+ 
+ ## Team Deployment (Claude Code)
+ 
+diff --git a/skills/sigma-embed/SKILL.md b/skills/sigma-embed/SKILL.md
+new file mode 100644
+index 0000000..524c75e
+--- /dev/null
++++ b/skills/sigma-embed/SKILL.md
+@@ -0,0 +1,149 @@
++---
++name: sigma-embed
++description: >-
++  Generate server-side Sigma embed URLs (JWT signing, workbook URL
++  construction) and manage per-customer workbook variants via version tags.
++  Use whenever the user wants to embed a Sigma workbook in a host application,
++  generate a signed embed URL, configure SIGMA_EMBED_CLIENT_ID /
++  SIGMA_EMBED_SECRET / SIGMA_WORKBOOK_URL, set up per-customer column
++  variants, apply workbook version tags, or automate tag provisioning via
++  the Sigma REST API. Prerequisite: obtain admin API credentials via the
++  sigma-api skill if tag provisioning is needed.
++---
++
++# Sigma Embed
++
++Generate server-side embed URLs that open a Sigma workbook inside a host application. This skill covers JWT signing, per-customer workbook variants via version tags, and automated tag provisioning.
++
++**Requirements:** Node.js 18+ (uses built-in `node:crypto` — no npm packages required). For tag provisioning via the Sigma REST API, also complete the `sigma-api` skill first to set `$SIGMA_BASE_URL` and `$SIGMA_API_TOKEN`.
++
++## Embed vs. Admin Credentials
++
++Sigma embeds use **two separate credential sets**. Never substitute one for the other.
++
++| Set | Where to find | Used for |
++|-----|--------------|----------|
++| **Embed Client ID** + **Embed Secret** | Sigma → Administration → Developer Access → Embed credentials | JWT `kid` header + HS256 signing key |
++| **Admin Client ID** + **Admin Client Secret** | Sigma → Administration → Developer Access → API credentials | REST API tag writes (see `sigma-api` skill) |
++
++```sh
++# Embed credentials — server env only, never browser-facing
++export SIGMA_EMBED_CLIENT_ID="your-embed-client-id"
++export SIGMA_EMBED_SECRET="your-embed-secret"
++export SIGMA_WORKBOOK_URL="https://app.sigmacomputing.com/embed/1-xxxx"
++```
++
++## Step 1 — Generate a Basic Embed URL
++
++The JWT `kid` header must equal the Embed Client ID. `jti` must be a fresh UUID per request. Set `exp` short — 5 minutes is standard. **Never generate embed URLs in browser code.**
++
++### Preferred: bundled helper script
++
++`scripts/generate-embed-url.js` reads the four env vars and prints a single signed URL to stdout:
++
++- **Claude Code:** `node ${CLAUDE_PLUGIN_ROOT}/skills/sigma-embed/scripts/generate-embed-url.js`
++- **Generic:** `node <repo-root>/skills/sigma-embed/scripts/generate-embed-url.js`
++
++| In (env) | Out (stdout) |
++|----------|--------------|
++| `SIGMA_EMBED_CLIENT_ID`, `SIGMA_EMBED_SECRET`, `SIGMA_WORKBOOK_URL`, `SIGMA_EMBED_EMAIL` | A single embed URL |
++
++Optional: set `SIGMA_EMBED_TAG` to target a specific tagged version (see Step 2).
++
++### Inline reference implementation (Node.js)
++
++Uses only built-in `node:crypto` — no `npm install` needed.
++
++```js
++import { createHmac, randomUUID } from 'node:crypto';
++
++function buildEmbedUrl(workbookUrl, tagName = null) {
++  const {
++    SIGMA_EMBED_CLIENT_ID: clientId,
++    SIGMA_EMBED_SECRET: secret,
++    SIGMA_EMBED_EMAIL: email,
++  } = process.env;
++
++  if (!clientId || !secret || !email) {
++    throw new Error('SIGMA_EMBED_CLIENT_ID, SIGMA_EMBED_SECRET, and SIGMA_EMBED_EMAIL must be set');
++  }
++
++  const encodeB64Url = (obj) =>
++    Buffer.from(JSON.stringify(obj)).toString('base64url');
++
++  const now = Math.floor(Date.now() / 1000);
++  const header  = { alg: 'HS256', typ: 'JWT', kid: clientId };
++  const payload = { sub: email, iat: now, exp: now + 300, jti: randomUUID() };
++
++  const unsigned = `${encodeB64Url(header)}.${encodeB64Url(payload)}`;
++  const sig = createHmac('sha256', secret).update(unsigned).digest('base64url');
++  const token = `${unsigned}.${sig}`;
++
++  const base = tagName ? `${workbookUrl}/tag/${tagName}` : workbookUrl;
++  return `${base}?:jwt=${encodeURIComponent(token)}&:embed=true`;
++}
++```
++
++Wire this into a server route (Express, Fastify, Next.js API route, etc.) — return only the signed URL to the browser, never the token components.
++
++## Step 2 — Target a Tagged Workbook Version
++
++Without a tag, embeds always show the current published state. Tags freeze a named snapshot — use them for per-customer variants, staging/production separation, and safe rollouts.
++
++Insert the tag name as a **path segment** before the query string:
++
++```
++{workbookUrl}/tag/{tagName}?:jwt=...&:embed=true
++```
++
++This is purely a URL change — the JWT signing logic is identical.
++
++```js
++// Production variant
++const url = buildEmbedUrl(process.env.SIGMA_WORKBOOK_URL, 'env-prod');
++
++// Per-customer variant
++const url = buildEmbedUrl(process.env.SIGMA_WORKBOOK_URL, `customer-${slug}`);
++```
++
++**Tag naming conventions:**
++
++| Purpose | Pattern | Example |
++|---------|---------|---------|
++| Per-customer variant | `customer-<slug>` | `customer-acme` |
++| Base template (never embedded directly) | `template` | `template` |
++| Environment separation | `env-<name>` | `env-prod` |
++
++A slug is the customer identifier lowercased, non-alphanumeric runs replaced by `-`, leading/trailing `-` stripped.
++
++## Step 3 — Per-Customer Column Variants
++
++If different customers need different columns or visible elements, maintain a `CUSTOMER_CONFIG` object in code and derive workbook specs programmatically. Push each derived spec and apply a `customer-<slug>` tag. Concurrent embed requests are safe because tags are immutable snapshots.
++
++Load `reference/customer-config.md` for the full pattern: `CUSTOMER_CONFIG` shape, `buildSpec()`, `buildTemplateSpec()`, slug derivation, and embed route integration.
++
++## Step 4 — Automate Tag Provisioning
++
++Spec pushes and tag applications are orchestrated by a shared library, not by the embed URL path. The library supports an auto dry-run mode (logs payloads, no API calls) when admin credentials are absent, so the application runs fully without live credentials.
++
++Load `reference/tag-sync.md` for the `makeClient` / `onEvent` pattern, per-customer sync, template propagation, CLI entry point, and Express/serverless wiring.
++
++## Step 5 — When to Escalate
++
++The workbook-tag approach handles most per-customer use cases. Load `reference/escalation.md` when customers need different source databases, row-level security policies differ per customer, or per-customer column names are driven by warehouse schema rather than a config object.
++
++## Verifying an Embed
++
++Open browser DevTools on the host page and confirm:
++1. The `iframe src` contains `?:jwt=` and `&:embed=true`.
++2. `SIGMA_EMBED_SECRET` does not appear in any Network request from the host page.
++3. The JWT is not stored in a JS variable accessible to the page (it should only be used as the iframe `src`).
++
++## Security Notes
++
++- Never generate embed URLs in browser JavaScript — the secret would be exposed.
++- Never log `SIGMA_EMBED_SECRET` or return it in API responses.
++- Set `exp` ≤ 10 minutes; long-lived tokens weaken replay protection.
++- Always generate a fresh `jti` UUID per request — Sigma rejects replayed tokens.
++- Admin REST credentials and embed signing credentials are distinct; never substitute one for the other.
++- Protect any route that triggers spec pushes or tag writes — these are write operations on live workbooks.
+diff --git a/skills/sigma-embed/reference/customer-config.md b/skills/sigma-embed/reference/customer-config.md
+new file mode 100644
+index 0000000..e41861b
+--- /dev/null
++++ b/skills/sigma-embed/reference/customer-config.md
+@@ -0,0 +1,124 @@
++# Per-Customer Workbook Configuration
++
++This reference covers the `CUSTOMER_CONFIG` pattern: maintaining per-customer column sets in code and deriving workbook specs programmatically, without creating N separate workbooks in Sigma UI.
++
++## Why Not User Attributes
++
++Sigma user attributes can parameterize formula *values* at embed time. They cannot change column display names. If per-customer column names are required, spec composition with version tags is the correct approach.
++
++## The Config Object
++
++```js
++// lib/embed.js
++
++const BASE_COLUMNS = [
++  // Columns every customer receives — shared baseline
++  { id: 'col-name',    name: 'Name',    type: 'text',     source: 'name' },
++  { id: 'col-status',  name: 'Status',  type: 'text',     source: 'status' },
++  { id: 'col-created', name: 'Created', type: 'datetime', source: 'created_at' },
++];
++
++const CUSTOMER_CONFIG = {
++  acme: {
++    extraColumns: [
++      { id: 'acme-revenue', name: 'Revenue', type: 'number', source: 'revenue' },
++    ],
++  },
++  beta: {
++    extraColumns: [],   // base columns only; still gets its own tag for isolation
++  },
++};
++```
++
++## Spec Composition
++
++```js
++// Named constants — confirm IDs by exporting the workbook spec once via the API
++const PAGE_ID    = 'page-1';
++const ELEMENT_ID = 'element-1';
++const BASE_SOURCE = { type: 'table', schema: 'PUBLIC', table: 'orders' };
++
++// Per-customer spec: base + extra columns
++function buildSpec(customerId) {
++  const customer = CUSTOMER_CONFIG[customerId];
++  if (!customer) throw new Error(`Unknown customer: ${customerId}`);
++  const columns = [...BASE_COLUMNS, ...(customer.extraColumns ?? [])];
++  return {
++    name: `Customer ${customerId}`,
++    pages: [{
++      id: PAGE_ID,
++      name: 'Page 1',
++      elements: [{
++        id: ELEMENT_ID,
++        kind: 'table',
++        source: BASE_SOURCE,
++        columns,
++        order: columns.map((c) => c.id),
++        visibleAsSource: false,
++      }],
++    }],
++  };
++}
++
++// Template spec: base columns only, never embedded directly
++function buildTemplateSpec() {
++  const columns = [...BASE_COLUMNS];
++  return {
++    name: 'Template',
++    pages: [{
++      id: PAGE_ID,
++      name: 'Page 1',
++      elements: [{
++        id: ELEMENT_ID,
++        kind: 'table',
++        source: BASE_SOURCE,
++        columns,
++        order: columns.map((c) => c.id),
++        visibleAsSource: false,
++      }],
++    }],
++  };
++}
++```
++
++## Slug Derivation
++
++Tag names must be URL-safe. Derive slugs deterministically from the customer identifier:
++
++```js
++function slugify(customerId) {
++  return 'customer-' + String(customerId)
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, '-')
++    .replace(/^-+|-+$/g, '');
++}
++// slugify('Acme Corp') → 'customer-acme-corp'
++// slugify('beta')     → 'customer-beta'
++```
++
++## Embed Route Integration
++
++The embed route derives the tag name from the customer ID and signs a JWT. It does **not** push specs — spec pushes happen during provisioning (see `tag-sync.md`).
++
++```js
++app.post('/api/embed-url', (req, res) => {
++  const { customerId, userEmail } = req.body;
++  if (!CUSTOMER_CONFIG[customerId]) {
++    return res.status(400).json({ error: 'Unknown customer' });
++  }
++  const url = buildEmbedUrl(process.env.SIGMA_WORKBOOK_URL, slugify(customerId), userEmail);
++  res.json({ url });
++});
++```
++
++## Adding a New Customer
++
++1. Add an entry to `CUSTOMER_CONFIG` with the desired `extraColumns`.
++2. Run the sync script or trigger the "Sync customer tags" action.
++3. The new `customer-<slug>` tag is created; existing tags are unaffected.
++
++## Rules
++
++- `buildSpec` and `buildTemplateSpec` are pure functions — no API calls, safe to unit test in isolation.
++- Never call a spec push API from the embed URL request path. Tags are immutable; the embed path only needs to sign a JWT.
++- Element and page IDs must match the canonical workbook exactly. Export the workbook spec via `GET /v2/workbooks/{workbookId}/spec` to confirm them, then define them as named constants.
+diff --git a/skills/sigma-embed/reference/escalation.md b/skills/sigma-embed/reference/escalation.md
+new file mode 100644
+index 0000000..6bc51b5
+--- /dev/null
++++ b/skills/sigma-embed/reference/escalation.md
+@@ -0,0 +1,53 @@
++# When to Escalate Beyond Workbook Tags
++
++The workbook-tag approach handles most per-customer embedding scenarios. This reference describes signals that indicate you've reached its ceiling and what to reach for next.
++
++## Signals
++
++| Signal | Implication |
++|--------|-------------|
++| Customers need different source databases or connection credentials | Workbook tags share the same data connection — escalate to connection-level isolation |
++| Row-level security policies differ per customer | Workbook tags share the same query path — data model CLS or warehouse-level RLS is the right layer |
++| Per-customer column names are driven by warehouse schema (not a config object) | Column names must be encoded at the data layer, not the workbook layer |
++| More than one table or element needs per-customer customization | `CUSTOMER_CONFIG.extraColumns` scales poorly across multiple elements — data model inheritance handles this more cleanly |
++| Column names must change dynamically at embed request time | Tags are immutable snapshots — dynamic bindings require a different mechanism |
++
++## The Data Model Escape Hatch
++
++Sigma data models expose a public REST API (`PUT /v2/dataModels/{id}/spec`, see `sigma-data-models` skill) and support version tagging. Workbooks can be bound to a tagged version of a data model via `dataModelSourceTaggedVersions` on `POST /v2/workbooks/tag`.
++
++This means:
++- One workbook visual layer shared across all customers
++- Per-customer column names and schema differences encoded in the data model spec
++- The tag provisioning step binds the workbook to the matching data model tag
++
++## Recommended Progression
++
++```
++Stage 1 — Single embed
++  One workbook, no customization
++  → SKILL.md Step 1
++
++Stage 2 — Per-customer column variants
++  One canonical workbook + CUSTOMER_CONFIG + workbook tags
++  → SKILL.md Steps 2–4 + reference/customer-config.md + reference/tag-sync.md
++
++Stage 3 — Schema-driven or multi-element customization
++  Data model tags bound to workbook tags
++  → sigma-data-models skill + reference/tag-sync.md
++
++Stage 4 — Full tenant isolation
++  Separate data connections or warehouse schemas per customer
++  → Infrastructure-level isolation (outside Sigma embed scope)
++```
++
++## What Stays the Same When Escalating
++
++- JWT signing and embed URL construction (SKILL.md Steps 1–2) are identical at every stage.
++- The `makeClient` / `onEvent` / dry-run pattern from `reference/tag-sync.md` applies to data model API calls as well.
++- Admin credential separation (embed signing vs. admin OAuth) is unchanged.
++- The `slugify` convention can be reused for data model tag names.
++
++## Rule of Thumb
++
++Start with workbook tags. Escalate to data model tags only when the customization cannot reasonably be expressed in `CUSTOMER_CONFIG`. Three customers with two extra columns: workbook tags. Twenty customers where column names come from a warehouse metadata table: data models.
+diff --git a/skills/sigma-embed/reference/tag-sync.md b/skills/sigma-embed/reference/tag-sync.md
+new file mode 100644
+index 0000000..eafa7ff
+--- /dev/null
++++ b/skills/sigma-embed/reference/tag-sync.md
+@@ -0,0 +1,199 @@
++# Tag Provisioning Library
++
++This reference covers the shared provisioning library used by CLI scripts, Express routes, and serverless functions to push workbook specs and apply version tags via the Sigma REST API.
++
++Requires admin OAuth credentials — complete the `sigma-api` skill first to obtain `SIGMA_BASE_URL` and `SIGMA_API_TOKEN`, or use the `makeClient` helper below which handles the token exchange internally from `SIGMA_CLIENT_ID` / `SIGMA_CLIENT_SECRET`.
++
++## Library Layout
++
++All business logic lives in `lib/tag-sync.js`. Entry points supply env vars, wire the `onEvent` callback, and handle transport-specific response shapes.
++
++```
++lib/
++  embed.js          ← CUSTOMER_CONFIG, buildSpec, buildTemplateSpec, slugify
++  tag-sync.js       ← makeClient, pushWorkbookSpec, tagWorkbookVersion,
++                       syncCustomer, syncAllCustomers, propagateTemplate
++scripts/
++  sync-tags.js      ← CLI entry point
++server.js           ← Express routes: POST /api/sync-tags, POST /api/propagate-template,
++                                       GET /api/sync-status
++netlify/functions/
++  sync-tags.js      ← Netlify / Lambda wrapper
++  propagate-template.js
++```
++
++## `makeClient` — Auto Dry-Run
++
++When admin credentials are absent the client runs in **dry-run mode**: it logs every payload but skips all API calls. The application is fully runnable for demos without real credentials.
++
++```js
++async function makeClient({ apiBase, clientId, clientSecret, onEvent }) {
++  const dryRun = !clientId || !clientSecret;
++  if (dryRun) {
++    onEvent?.({ level: 'warn', op: 'init', msg: 'No credentials — running in dry-run mode' });
++    return { dryRun: true, onEvent };
++  }
++  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
++  const res = await fetch(`${apiBase}/v2/auth/token`, {
++    method: 'POST',
++    headers: {
++      Authorization: `Basic ${credentials}`,
++      'Content-Type': 'application/x-www-form-urlencoded',
++    },
++    body: 'grant_type=client_credentials',
++  });
++  if (!res.ok) throw new Error(`Token exchange failed: ${res.status}`);
++  const { access_token } = await res.json();
++  return { apiBase, accessToken: access_token, dryRun: false, onEvent };
++}
++```
++
++Transition from dry-run to live: set `SIGMA_CLIENT_ID` and `SIGMA_CLIENT_SECRET`. No code changes required.
++
++## Core Operations
++
++### Push Workbook Spec
++
++```js
++async function pushWorkbookSpec(client, workbookId, spec) {
++  client.onEvent?.({ level: 'info', op: 'push-spec', workbookId, dryRun: client.dryRun });
++  if (client.dryRun) return;
++  const res = await fetch(`${client.apiBase}/v2/workbooks/${workbookId}/spec`, {
++    method: 'PUT',
++    headers: {
++      Authorization: `Bearer ${client.accessToken}`,
++      'Content-Type': 'application/json',
++    },
++    body: JSON.stringify(spec),
++  });
++  if (!res.ok) throw new Error(`Spec push failed (${res.status}): ${await res.text()}`);
++}
++```
++
++### Apply Version Tag
++
++```js
++async function tagWorkbookVersion(client, workbookId, tagName) {
++  client.onEvent?.({ level: 'info', op: 'tag', workbookId, tagName, dryRun: client.dryRun });
++  if (client.dryRun) return;
++  const res = await fetch(`${client.apiBase}/v2/workbooks/tag`, {
++    method: 'POST',
++    headers: {
++      Authorization: `Bearer ${client.accessToken}`,
++      'Content-Type': 'application/json',
++    },
++    body: JSON.stringify({ workbookId, tagName }),
++  });
++  if (!res.ok) throw new Error(`Tag failed (${res.status}): ${await res.text()}`);
++}
++```
++
++### Sync One Customer
++
++Errors are caught per-customer so one failure does not abort the batch.
++
++```js
++async function syncCustomer(client, customerId) {
++  const { buildSpec, slugify, CANONICAL } = require('./embed');
++  const tagName = slugify(customerId);
++  try {
++    await pushWorkbookSpec(client, CANONICAL.workbookId, buildSpec(customerId));
++    await tagWorkbookVersion(client, CANONICAL.workbookId, tagName);
++    client.onEvent?.({ level: 'info', op: 'sync', customer: customerId, tag: tagName, status: 'ok' });
++    return { customer: customerId, tag: tagName, status: 'ok' };
++  } catch (err) {
++    client.onEvent?.({ level: 'error', op: 'sync', customer: customerId, msg: err.message });
++    return { customer: customerId, status: 'error', error: err.message };
++  }
++}
++
++async function syncAllCustomers(client) {
++  const { CUSTOMER_CONFIG } = require('./embed');
++  return Promise.all(Object.keys(CUSTOMER_CONFIG).map((id) => syncCustomer(client, id)));
++}
++```
++
++### Propagate Template
++
++Push template spec → tag as `template` → sync all customers.
++
++```js
++async function propagateTemplate(client) {
++  const { buildTemplateSpec, CANONICAL } = require('./embed');
++  await pushWorkbookSpec(client, CANONICAL.workbookId, buildTemplateSpec());
++  await tagWorkbookVersion(client, CANONICAL.workbookId, 'template');
++  return syncAllCustomers(client);
++}
++```
++
++## The `onEvent` Callback
++
++Every operation emits a structured event. Callers supply their own handler — the library has no transport concerns.
++
++```js
++// CLI: JSON-per-line to stdout
++const onEvent = (e) => process.stdout.write(JSON.stringify(e) + '\n');
++
++// Express / Netlify: accumulate for the response body
++const events = [];
++const onEvent = (e) => events.push(e);
++```
++
++Event shape: `{ level: 'info'|'warn'|'error', op: string, customer?: string, tag?: string, msg?: string }`
++
++## Express Routes
++
++```js
++async function runTagSync(res, op) {
++  const events = [];
++  try {
++    const client = await makeClient({
++      apiBase:      process.env.SIGMA_API_BASE,
++      clientId:     process.env.SIGMA_CLIENT_ID,
++      clientSecret: process.env.SIGMA_CLIENT_SECRET,
++      onEvent: (e) => events.push(e),
++    });
++    const result = await op(client);
++    res.json({ dryRun: client.dryRun, events, result });
++  } catch (err) {
++    res.status(500).json({ error: err.message, events });
++  }
++}
++
++app.post('/api/sync-tags',          (_req, res) => runTagSync(res, syncAllCustomers));
++app.post('/api/propagate-template', (_req, res) => runTagSync(res, propagateTemplate));
++
++// Read-only probe — checks credential presence only, no Sigma API calls
++app.get('/api/sync-status', (_req, res) => {
++  res.json({ dryRun: !(process.env.SIGMA_CLIENT_ID && process.env.SIGMA_CLIENT_SECRET) });
++});
++```
++
++**Never use `POST /api/sync-tags` as the dry-run probe.** Use the dedicated `GET /api/sync-status` endpoint — the POST runs the full sync on every call.
++
++## CLI Entry Point
++
++```js
++// scripts/sync-tags.js
++// Flags: --mode customers|template (default: customers)
++//        --customer <id>           (single-customer sync)
++//        --dry-run                 (force dry-run regardless of credentials)
++
++const args = process.argv.slice(2);
++const mode    = args.includes('--mode')     ? args[args.indexOf('--mode') + 1]     : 'customers';
++const target  = args.includes('--customer') ? args[args.indexOf('--customer') + 1] : null;
++const forceDry = args.includes('--dry-run');
++
++(async () => {
++  const client = await makeClient({
++    apiBase:      process.env.SIGMA_API_BASE,
++    clientId:     forceDry ? null : process.env.SIGMA_CLIENT_ID,
++    clientSecret: forceDry ? null : process.env.SIGMA_CLIENT_SECRET,
++    onEvent: (e) => process.stdout.write(JSON.stringify(e) + '\n'),
++  });
++  const results = mode === 'template'
++    ? await propagateTemplate(client)
++    : target ? [await syncCustomer(client, target)] : await syncAllCustomers(client);
++  process.exit(results.some((r) => r.status === 'error') ? 1 : 0);
++})();
++```
+diff --git a/skills/sigma-embed/scripts/generate-embed-url.js b/skills/sigma-embed/scripts/generate-embed-url.js
+new file mode 100755
+index 0000000..9992e1b
+--- /dev/null
++++ b/skills/sigma-embed/scripts/generate-embed-url.js
+@@ -0,0 +1,57 @@
++#!/usr/bin/env node
++/**
++ * Generate a signed Sigma embed URL from environment variables.
++ *
++ * Required env vars:
++ *   SIGMA_EMBED_CLIENT_ID  — Embed Client ID (JWT kid header)
++ *   SIGMA_EMBED_SECRET     — Embed Secret (HS256 HMAC key)
++ *   SIGMA_WORKBOOK_URL     — Workbook base URL (from Sigma → Publish → Embed)
++ *   SIGMA_EMBED_EMAIL      — Email address to embed as (JWT sub claim)
++ *
++ * Optional env vars:
++ *   SIGMA_EMBED_TAG        — Version tag name (e.g. customer-acme, env-prod)
++ *                            Omit to embed the current published version.
++ *
++ * Usage (Claude Code):
++ *   SIGMA_EMBED_CLIENT_ID=... SIGMA_EMBED_SECRET=... \
++ *   SIGMA_WORKBOOK_URL=https://app.sigmacomputing.com/embed/1-xxx \
++ *   SIGMA_EMBED_EMAIL=user@example.com \
++ *   node "${CLAUDE_PLUGIN_ROOT}/skills/sigma-embed/scripts/generate-embed-url.js"
++ *
++ * Usage (generic):
++ *   SIGMA_EMBED_CLIENT_ID=... SIGMA_EMBED_SECRET=... \
++ *   SIGMA_WORKBOOK_URL=... SIGMA_EMBED_EMAIL=... \
++ *   node <repo-root>/skills/sigma-embed/scripts/generate-embed-url.js
++ */
++
++'use strict';
++
++const { createHmac, randomUUID } = require('node:crypto');
++
++const required = ['SIGMA_EMBED_CLIENT_ID', 'SIGMA_EMBED_SECRET', 'SIGMA_WORKBOOK_URL', 'SIGMA_EMBED_EMAIL'];
++const missing = required.filter((k) => !process.env[k]);
++if (missing.length) {
++  process.stderr.write(`Error: missing required env var(s): ${missing.join(', ')}\n`);
++  process.exit(1);
++}
++
++const clientId   = process.env.SIGMA_EMBED_CLIENT_ID;
++const secret     = process.env.SIGMA_EMBED_SECRET;
++const workbookUrl = process.env.SIGMA_WORKBOOK_URL;
++const email      = process.env.SIGMA_EMBED_EMAIL;
++const tagName    = process.env.SIGMA_EMBED_TAG || null;
++
++const encodeB64Url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
++
++const now     = Math.floor(Date.now() / 1000);
++const header  = { alg: 'HS256', typ: 'JWT', kid: clientId };
++const payload = { sub: email, iat: now, exp: now + 300, jti: randomUUID() };
++
++const unsigned = `${encodeB64Url(header)}.${encodeB64Url(payload)}`;
++const sig      = createHmac('sha256', secret).update(unsigned).digest('base64url');
++const token    = `${unsigned}.${sig}`;
++
++const base = tagName ? `${workbookUrl}/tag/${tagName}` : workbookUrl;
++const url  = `${base}?:jwt=${encodeURIComponent(token)}&:embed=true`;
++
++process.stdout.write(url + '\n');
+-- 
+2.43.0
+
