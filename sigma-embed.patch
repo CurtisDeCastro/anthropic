@@ -1,4 +1,4 @@
-From ba61acbeeeb80d2c6cb012d3da691cf204e6f658 Mon Sep 17 00:00:00 2001
+From b412e4aca30393f8a8bfdce5ef12566996469f2e Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 28 May 2026 22:29:49 +0000
 Subject: [PATCH] feat: add sigma-embed skill (v0.2.0)
@@ -783,7 +783,7 @@ index 0000000..4e60c2d
 +Common implementation: detect at JWT-signing time whether the `sub` is an internal email (e.g., from your domain) and emit only the required claims for that case.
 diff --git a/skills/sigma-embed/reference/multi-tenancy.md b/skills/sigma-embed/reference/multi-tenancy.md
 new file mode 100644
-index 0000000..e260b71
+index 0000000..420b55e
 --- /dev/null
 +++ b/skills/sigma-embed/reference/multi-tenancy.md
 @@ -0,0 +1,155 @@
@@ -940,7 +940,7 @@ index 0000000..e260b71
 +## What This Skill Does **Not** Recommend
 +
 +- Maintaining one workbook per customer. Sigma's documented multi-tenant patterns route through user attributes, connections, and tags — not document duplication.
-+- Programmatically composing per-customer workbook specs at provisioning time. There is no public `PUT /v2/workbooks/{id}/spec` endpoint. (Data models do expose a spec API — see the `sigma-data-models` skill.)
++- Mutating a single workbook's spec on each embed request to customize what a customer sees. The mechanisms above (RLS, CLS, warehouse role switching, connection swap, OAuth) deliver per-customer views without spec mutation and without the concurrency hazards of mutate-then-render.
 +- Using JWT claims to gate what the same user sees in different sessions. Claims are per-user; per-session gating belongs in the host application's filtering layer (e.g., URL control values).
 diff --git a/skills/sigma-embed/reference/url-parameters.md b/skills/sigma-embed/reference/url-parameters.md
 new file mode 100644
