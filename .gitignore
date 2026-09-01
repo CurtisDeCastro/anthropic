@@ -4,3 +4,8 @@ node_modules/
 .env.*.local
 sigma-agent-skills/
 decastro-sigma-skills/
+
+# Local claat render artifacts (build output, not source)
+.gobin/
+dynamic-schema-quickstart/site/sigmaguides/src/embedding_20_dynamic_column_schemas/assets/
+dynamic-schema-quickstart/site/sigmaguides/src/embedding_20_dynamic_column_schemas/embedding_20_dynamic_column_schemas/
