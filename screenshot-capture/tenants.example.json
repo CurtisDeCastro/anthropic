@@ -1,0 +1,34 @@
+[
+  {
+    "label": "tenant-acme",
+    "email": "acme-viewer@example.com",
+    "claims": {
+      "account_type": "viewer",
+      "teams": ["acme"],
+      "user_attributes": { "tenant": "acme" }
+    },
+    "urlParams": {
+      ":hide_folder_navigation": "true",
+      ":theme": "Light"
+    },
+    "settleMs": 7000,
+    "waitForSelector": null,
+    "elementSelectors": []
+  },
+  {
+    "label": "tenant-globex",
+    "email": "globex-viewer@example.com",
+    "claims": {
+      "account_type": "viewer",
+      "teams": ["globex"],
+      "user_attributes": { "tenant": "globex" }
+    },
+    "urlParams": {
+      ":hide_folder_navigation": "true",
+      ":theme": "Light"
+    },
+    "settleMs": 7000,
+    "waitForSelector": null,
+    "elementSelectors": []
+  }
+]

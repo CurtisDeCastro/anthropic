@@ -1,0 +1,4 @@
+.env
+tenants.json
+screenshots/
+node_modules/
